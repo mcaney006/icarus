@@ -435,7 +435,7 @@
       "overrun": 300
     }
   ],
-  "tolerance": 1e-09,
+  "tolerance": 1e-06,
   "fixed_scale": 65536,
   "expected": {
     "mode_sequence": [

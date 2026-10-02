@@ -247,10 +247,20 @@ def main(argv=None):
     ap.add_argument("--trace",action="store_true")
     ap.add_argument("--fixed-point",action="store_true")
     ap.add_argument("--selfcheck",action="store_true")
+    ap.add_argument("--canonical",action="store_true",help="print ICF canonical output lines")
     a=ap.parse_args(argv)
     if a.selfcheck: _selfcheck(); return 0
     plant=load_plant(a.plant); fx=json.load(open(a.fixture))
     trace,summ=run(plant,fx,fixed_point=a.fixed_point)
+    if a.canonical:
+        MC={m:i for i,m in enumerate(["Boot","SelfTest","Calibrating","Ready","Running","Degraded","Safe","Fault"])}
+        HC={h:i for i,h in enumerate(["Healthy","Suspect","Degraded","Unsafe"])}
+        FB={"meas":1,"estimator":2,"timing":4,"ctrl_sat":8,"numeric":16}
+        print("M "+" ".join(str(MC[x]) for x in summ["mode_sequence"]))
+        print("H "+" ".join(str(HC[r.health]) for r in trace))
+        print("G "+" ".join(str(sum(FB[f] for f in r.flags)) for r in trace))
+        print("X "+" ".join(str(int(round(z*1e9))) for z in summ["final_state"]))
+        return 0
     if a.trace:
         for r in trace:
             print(f"k={r.k:02d} {r.mode:9s} {r.health:8s} "

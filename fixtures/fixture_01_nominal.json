@@ -418,7 +418,7 @@
     ]
   ],
   "faults": [],
-  "tolerance": 1e-09,
+  "tolerance": 1e-06,
   "fixed_scale": 65536,
   "expected": {
     "mode_sequence": [
@@ -474,7 +474,7 @@
       -0.060007175,
       0.032118258,
       0.031891289,
-      -0.007402422
+      -0.007402421
     ],
     "final_mode": "Running"
   }

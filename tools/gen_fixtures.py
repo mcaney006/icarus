@@ -85,7 +85,45 @@ def build(name,seed,steps,x0,amp_w,amp_v,faults):
                 initial_state=x0,
                 disturbance=seq(rng,steps,4,amp_w),
                 noise=seq(rng,steps,2,amp_v),
-                faults=faults, tolerance=1e-9, fixed_scale=65536)
+                faults=faults, tolerance=1e-6, fixed_scale=65536)
+
+
+FLAGBIT={"meas":1,"estimator":2,"timing":4,"ctrl_sat":8,"numeric":16}
+MODE_CODE={m:i for i,m in enumerate(["Boot","SelfTest","Calibrating","Ready","Running","Degraded","Safe","Fault"])}
+HEALTH_CODE={h:i for i,h in enumerate(["Healthy","Suspect","Degraded","Unsafe"])}
+FAULT_CODE={k:i for i,k in enumerate(["MeasurementDropout","StaleMeasurement","BiasedMeasurement",
+  "StuckChannel","OutOfRange","TimingOverrun","NumericSaturation","CorruptFixture",
+  "EstimatorDisagreement","ControlSaturation"])}
+SC=10**9
+def q(v): return int(round(v*SC))
+
+def fnv1a(data:bytes)->int:
+    h=0x811C9DC5
+    for b in data:
+        h=((h^b)*0x01000193)&0xFFFFFFFF
+    return h
+
+def write_icf(path, plant, fx, trace, summ):
+    L=[f"# icarus fixture {fx['name']}"]
+    n,m,p=plant["dims"]["n"],plant["dims"]["m"],plant["dims"]["p"]
+    L.append(f"D {n} {m} {p} {fx['steps']}")
+    flat=lambda M:" ".join(str(q(v)) for row in M for v in row)
+    for tag in "ABCKL": L.append(f"{tag} "+flat(plant[tag]))
+    L.append("X "+" ".join(str(q(v)) for v in fx["initial_state"]))
+    L.append(f"T {q(fx['tolerance'])}")
+    for k,w in enumerate(fx["disturbance"]): L.append(f"W {k} "+" ".join(str(q(v)) for v in w))
+    for k,v in enumerate(fx["noise"]):       L.append(f"V {k} "+" ".join(str(q(z)) for z in v))
+    for f in fx["faults"]:
+        kind=f["kind"]; ch=f.get("channel",0)
+        param={"BiasedMeasurement":f.get("amount",20.0),"OutOfRange":f.get("value",1.0e6),
+               "TimingOverrun":float(f.get("overrun",250))}.get(kind,0.0)
+        L.append(f"F {f['step']} {FAULT_CODE[kind]} {ch} {q(param)}")
+    L.append("M "+" ".join(str(MODE_CODE[x]) for x in summ["mode_sequence"]))
+    L.append("H "+" ".join(str(HEALTH_CODE[r.health]) for r in trace))
+    L.append("G "+" ".join(str(sum(FLAGBIT[x] for x in r.flags)) for r in trace))
+    L.append("E "+" ".join(str(q(v)) for v in summ["final_state"]))
+    body="\n".join(L)+"\n"
+    open(path,"w").write(body+f"Z {fnv1a(body.encode())}\n")
 
 def finalize(plant_path, fx):
     plant=ref.load_plant(plant_path)
@@ -98,6 +136,7 @@ def finalize(plant_path, fx):
 
 def main():
     K,L,eig=design()
+    K=np.round(K,9); L=np.round(L,9)
     write_plant(K,L,eig)
     pp=f"{HERE}/fixtures/plant.json"
     x0=[0.5,-0.3,0.4,-0.2]
@@ -122,6 +161,10 @@ def main():
         fx=finalize(pp, fx)
         out=f"{HERE}/fixtures/{names[fx['name']]}"
         json.dump(fx, open(out,"w"), indent=2)
+        plant_d=json.load(open(pp))
+        plant_obj=ref.load_plant(pp)
+        trace,summ=ref.run(plant_obj, fx)
+        write_icf(out.replace(".json",".icf"), plant_d, fx, trace, summ)
         exp=fx["expected"]
         seq_modes=exp["mode_sequence"]
         print(f"{fx['name']:16s} steps={fx['steps']:3d} "

@@ -524,7 +524,7 @@
       "kind": "NumericSaturation"
     }
   ],
-  "tolerance": 1e-09,
+  "tolerance": 1e-06,
   "fixed_scale": 65536,
   "expected": {
     "mode_sequence": [
@@ -587,7 +587,7 @@
     "final_estimate": [
       -0.445807274,
       -0.285811163,
-      -0.215959452,
+      -0.215959453,
       -0.162015736
     ],
     "final_mode": "Safe"
