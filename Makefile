@@ -4,7 +4,7 @@ SHELL := /bin/bash
 DETECT := bash tools/detect-toolchains.sh
 PY := python3
 
-.PHONY: bootstrap build test verify simulate crosscheck benchmark clean ci \
+.PHONY: bootstrap build test verify simulate crosscheck satcheck experiments benchmark clean ci audit \
         toolchains reference lean idris fstar ats negative fixtures
 
 toolchains:
@@ -46,8 +46,11 @@ ats:
 
 build: reference lean idris fstar ats
 
-verify: lean fstar idris negative
+verify: lean fstar idris negative audit
 	@echo "verify: provers + type-checkers + negative tests complete."
+
+audit:
+	@bash tools/audit-holes.sh
 
 negative:
 	@if [ -f negative/run.sh ]; then bash negative/run.sh; else echo "[neg]   SKIP (not implemented)"; fi
@@ -59,10 +62,16 @@ simulate:
 crosscheck:
 	@$(PY) tools/crosscheck.py
 
+satcheck:
+	@$(PY) tools/satcheck.py
+
+experiments:
+	@$(PY) tools/fixed_point_experiment.py
+
 benchmark:
 	@if [ -f tools/benchmark.py ]; then $(PY) tools/benchmark.py; else echo "[bench] SKIP (not implemented)"; fi
 
-test: reference crosscheck
+test: reference crosscheck satcheck
 	@echo "test complete."
 
 # Strict gate for CI: every toolchain must be present and every stage must pass.

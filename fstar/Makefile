@@ -3,8 +3,10 @@
 FSTAR ?= fstar.exe
 OPAM_SWITCH ?= icarus-fstar
 FSTAR_HOME ?= $(HOME)/.local/opt/fstar
-MODULES := Health Mode Sat Vote Counter Timing Ring Wire Decide
-EXTRACT := Health Mode Wire Decide
+MODULES := Health Mode Sat Vote Counter Timing Ring Wire Decide SatCheck
+EXTRACT := Health Mode Wire Decide Sat SatCheck
+DECIDE_ML := Health Mode Wire Decide
+SAT_ML := Wire Sat SatCheck
 CACHE := out/cache
 FLAGS := --include src --cache_checked_modules --cache_dir $(CACHE)
 
@@ -30,5 +32,7 @@ extract: verify
 build: extract
 	@opam exec --switch=$(OPAM_SWITCH) -- sh -c \
 	  'OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
-	   -I out/ml $(EXTRACT:%=out/ml/Icarus_%.ml) driver/driver.ml -o out/icarus_decide'
-	@echo "[fstar] built out/icarus_decide"
+	   -I out/ml $(DECIDE_ML:%=out/ml/Icarus_%.ml) driver/driver.ml -o out/icarus_decide && \
+	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
+	   -I out/ml $(SAT_ML:%=out/ml/Icarus_%.ml) driver/driver_sat.ml -o out/icarus_sat'
+	@echo "[fstar] built out/icarus_decide out/icarus_sat"
