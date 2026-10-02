@@ -72,7 +72,9 @@ def vneg(a):   return [-x for x in a]
 def vnorm2(a): return math.sqrt(sum(x*x for x in a))
 def sat(v, lim): return [max(-lim, min(lim, x)) for x in v]
 def median3(a,b,c):
-    return a+b+c - max(a,b,c) - min(a,b,c)
+    """Selects one of its arguments; never computes a new float. If two agree the
+    result is exactly that value, so one divergent channel cannot move it."""
+    return max(min(a,b), min(max(a,b),c))
 
 # ----- plant + fixture ----------------------------------------------------------
 @dataclass
