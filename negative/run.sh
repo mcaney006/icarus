@@ -38,5 +38,34 @@ if IDRIS="$($DETECT --path idris2)" && [ -n "$IDRIS" ] && [ -d "$ROOT/negative/i
   done
 else echo "[idris] SKIP"; fi
 
+fstar_check() { # verify a program against the already-checked Icarus modules
+  local f="$1" d; d="$TMP/fstar-$RANDOM"; mkdir -p "$d/cache" "$d/src"
+  cp "$ROOT"/fstar/out/cache/*.checked "$d/cache/" 2>/dev/null
+  cp "$f" "$d/src/$(basename "$f")"
+  ( cd "$d" && "$FSTAR" --include "$ROOT/fstar/src" --include "$d/src" --cache_checked_modules \
+      --cache_dir "$d/cache" "$d/src/$(basename "$f")" 2>&1 )
+}
+
+if FSTAR="$($DETECT --path fstar)" && [ -n "$FSTAR" ] && [ -d "$ROOT/fstar/out/cache" ]; then
+  echo "[fstar] negative programs"
+  for f in "$ROOT"/negative/fstar/*.fst; do
+    n="$(basename "$f" .fst)"; pat="$(expect_of "$f")"
+    out="$(fstar_check "$f")"; rc=$?
+    twin="$(fstar_check "$ROOT/negative/fstar/ok/$n.fst")"; trc=$?
+    if [ $rc -eq 0 ]; then report "fstar/$n" bad "verified but must be rejected"
+    elif [ $trc -ne 0 ]; then report "fstar/$n" bad "twin failed: $(echo "$twin" | grep -m1 -A2 Error | tr '\n' ' ')"
+    elif ! echo "$out" | grep -Eq "$pat"; then report "fstar/$n" bad "rejected, but message did not match /$pat/"
+    else report "fstar/$n" ok; fi
+  done
+  # Mutation test: enlarge the Estimate stage until the frame cannot fit and
+  # require the real timing module to stop verifying.
+  mut="$TMP/mut"; mkdir -p "$mut/cache"
+  sed 's/| Estimate -> 220/| Estimate -> 400/' "$ROOT/fstar/src/Icarus.Timing.fst" > "$mut/Icarus.Timing.fst"
+  out="$( cd "$mut" && "$FSTAR" --cache_dir "$mut/cache" "$mut/Icarus.Timing.fst" 2>&1 )"; rc=$?
+  if [ $rc -eq 0 ]; then report "fstar/budget_overflow(mutation)" bad "oversized schedule verified"
+  elif ! echo "$out" | grep -Eq "Assertion failed|could not prove|normalization"; then report "fstar/budget_overflow(mutation)" bad "unexpected message: $(echo "$out" | head -3 | tr '\n' ' ')"
+  else report "fstar/budget_overflow(mutation)" ok; fi
+else echo "[fstar] SKIP (toolchain or out/cache missing; run make -C fstar)"; fi
+
 echo "negative: $total programs, $fail failures"
 [ $fail -eq 0 ]
