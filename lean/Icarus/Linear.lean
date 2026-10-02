@@ -88,4 +88,139 @@ theorem plantStep_origin {n m : Nat} (A : Mat n n) (B : Mat n m) :
     plantStep A B (Vec.zero n) (Vec.zero m) (Vec.zero n) = Vec.zero n := by
   funext i; simp [plantStep, Vec.add, mulVec_zero, Vec.zero]
 
+
+
+/-! ### Finite-sum lemmas, proved from scratch (no Mathlib) -/
+
+theorem sumFin_add (n : Nat) (f g : Fin n → Int) :
+    Mat.sumFin n (fun i => f i + g i) = Mat.sumFin n f + Mat.sumFin n g := by
+  induction n with
+  | zero => rfl
+  | succ k ih =>
+    simp only [Mat.sumFin]
+    rw [ih (fun i => f i.castSucc) (fun i => g i.castSucc)]
+    omega
+
+theorem sumFin_sub (n : Nat) (f g : Fin n → Int) :
+    Mat.sumFin n (fun i => f i - g i) = Mat.sumFin n f - Mat.sumFin n g := by
+  induction n with
+  | zero => rfl
+  | succ k ih =>
+    simp only [Mat.sumFin]
+    rw [ih (fun i => f i.castSucc) (fun i => g i.castSucc)]
+    omega
+
+theorem sumFin_mul_left (n : Nat) (s : Int) (f : Fin n → Int) :
+    s * Mat.sumFin n f = Mat.sumFin n (fun i => s * f i) := by
+  induction n with
+  | zero => simp [Mat.sumFin]
+  | succ k ih =>
+    simp only [Mat.sumFin]
+    rw [Int.mul_add, ih (fun i => f i.castSucc)]
+
+theorem sumFin_congr (n : Nat) (f g : Fin n → Int) (h : ∀ i, f i = g i) :
+    Mat.sumFin n f = Mat.sumFin n g := by
+  have : f = g := funext h
+  rw [this]
+
+/-- Matrix–vector product distributes over vector subtraction and addition. -/
+theorem mulVec_sub_apply {r c : Nat} (m : Mat r c) (a b : Vec c) (i : Fin r) :
+    Mat.mulVec m (fun j => a j - b j) i = Mat.mulVec m a i - Mat.mulVec m b i := by
+  simp only [Mat.mulVec]
+  rw [← sumFin_sub]
+  exact sumFin_congr c _ _ (fun j => by rw [Int.mul_sub])
+
+theorem mulVec_add_apply {r c : Nat} (m : Mat r c) (a b : Vec c) (i : Fin r) :
+    Mat.mulVec m (fun j => a j + b j) i = Mat.mulVec m a i + Mat.mulVec m b i := by
+  simp only [Mat.mulVec]
+  rw [← sumFin_add]
+  exact sumFin_congr c _ _ (fun j => by rw [Int.mul_add])
+
+/-- A zero matrix times anything, and anything times a zero vector, is zero (general n). -/
+theorem mul_zero_left {r c p : Nat} (b : Mat c p) :
+    Mat.mul (Mat.zero r c) b = Mat.zero r p := by
+  funext i k; simp [Mat.mul, Mat.zero, sumFin_zero]
+
+theorem mul_zero_right {r c p : Nat} (a : Mat r c) :
+    Mat.mul a (Mat.zero c p) = Mat.zero r p := by
+  funext i k; simp [Mat.mul, Mat.zero, sumFin_zero]
+
+/-- The product of an r×c and a c×p matrix is r×p: the type says so, and the entry
+formula is exactly the inner sum over the shared dimension c. -/
+theorem mul_entry {r c p : Nat} (a : Mat r c) (b : Mat c p) (i : Fin r) (k : Fin p) :
+    Mat.mul a b i k = Mat.sumFin c (fun j => a i j * b j k) := rfl
+
+/-! ### Identity (general n) and associativity -/
+
+theorem sumFin_swap (n m : Nat) (f : Fin n → Fin m → Int) :
+    Mat.sumFin n (fun i => Mat.sumFin m (fun j => f i j))
+      = Mat.sumFin m (fun j => Mat.sumFin n (fun i => f i j)) := by
+  induction n with
+  | zero => simp [Mat.sumFin, sumFin_zero]
+  | succ k ih =>
+    simp only [Mat.sumFin]
+    rw [ih (fun i j => f i.castSucc j)]
+    rw [← sumFin_add]
+
+theorem fin_split {k : Nat} (i : Fin (k + 1)) :
+    (∃ i' : Fin k, i = i'.castSucc) ∨ i = Fin.last k := by
+  by_cases h : i.val < k
+  · exact Or.inl ⟨⟨i.val, h⟩, Fin.ext rfl⟩
+  · refine Or.inr (Fin.ext ?_)
+    have := i.isLt
+    simp [Fin.last]
+    omega
+
+/-- Summing `ite (i = j) 1 0 * v j` over j picks out `v i`. -/
+theorem sumFin_unit (n : Nat) (v : Vec n) (i : Fin n) :
+    Mat.sumFin n (fun j => (if i = j then (1 : Int) else 0) * v j) = v i := by
+  induction n with
+  | zero => exact i.elim0
+  | succ k ih =>
+    simp only [Mat.sumFin]
+    rcases fin_split i with ⟨i', hi⟩ | hi
+    · subst hi
+      have h1 : ∀ j : Fin k, (if i'.castSucc = j.castSucc then (1 : Int) else 0) = (if i' = j then 1 else 0) := by
+        intro j; simp [Fin.castSucc_inj]
+      have h2 : (if i'.castSucc = Fin.last k then (1 : Int) else 0) = 0 := by
+        simp [Fin.ne_of_lt (Fin.castSucc_lt_last i')]
+      rw [h2]
+      have := ih (fun j => v j.castSucc) i'
+      simp only [h1]
+      simpa using this
+    · subst hi
+      have h1 : ∀ j : Fin k, (if Fin.last k = j.castSucc then (1 : Int) else 0) = 0 := by
+        intro j; simp [Fin.ne_of_gt (Fin.castSucc_lt_last j)]
+      simp [h1, sumFin_zero]
+
+theorem id_mulVec (n : Nat) (v : Vec n) : Mat.mulVec (Mat.id n) v = v := by
+  funext i
+  simp only [Mat.mulVec, Mat.id]
+  exact sumFin_unit n v i
+
+theorem mul_id_left (r c : Nat) (a : Mat r c) : Mat.mul (Mat.id r) a = a := by
+  funext i k
+  simp only [Mat.mul, Mat.id]
+  exact sumFin_unit r (fun j => a j k) i
+
+/-- Associativity of matrix multiplication, for compatible dimensions. -/
+theorem mul_assoc' {r c p q : Nat} (a : Mat r c) (b : Mat c p) (d : Mat p q) :
+    Mat.mul (Mat.mul a b) d = Mat.mul a (Mat.mul b d) := by
+  funext i l
+  simp only [Mat.mul]
+  have lhs : ∀ k : Fin p,
+      (Mat.sumFin c fun j => a i j * b j k) * d k l
+        = Mat.sumFin c (fun j => a i j * b j k * d k l) := by
+    intro k
+    rw [Int.mul_comm, sumFin_mul_left]
+    exact sumFin_congr c _ _ (fun j => by rw [Int.mul_comm, Int.mul_assoc])
+  have rhs : ∀ j : Fin c,
+      a i j * (Mat.sumFin p fun k => b j k * d k l)
+        = Mat.sumFin p (fun k => a i j * b j k * d k l) := by
+    intro j
+    rw [sumFin_mul_left]
+    exact sumFin_congr p _ _ (fun k => by rw [Int.mul_assoc])
+  rw [sumFin_congr p _ _ lhs, sumFin_congr c _ _ rhs]
+  exact (sumFin_swap p c (fun k j => a i j * b j k * d k l))
+
 end Icarus
