@@ -155,8 +155,30 @@ def main():
             {"step":28,"kind":"NumericSaturation"},
         ]),
     ]
+    def one(name, seed, faults, steps=30):
+        return build(name, seed, steps, x0, 0.01, 0.01, faults)
+    suite=[
+      one("fault_dropout",    20261101, [{"step":10,"kind":"MeasurementDropout","channel":0},
+                                         {"step":11,"kind":"MeasurementDropout","channel":0}]),
+      one("fault_stale",      20261102, [{"step":10,"kind":"StaleMeasurement"},
+                                         {"step":11,"kind":"StaleMeasurement"}]),
+      one("fault_bias",       20261103, [{"step":10,"kind":"BiasedMeasurement","channel":0,"amount":25.0}]),
+      one("fault_stuck",      20261104, [{"step":10,"kind":"StuckChannel","channel":1}]),
+      one("fault_range",      20261105, [{"step":10,"kind":"OutOfRange","channel":0,"value":1.0e6}]),
+      one("fault_overrun",    20261106, [{"step":10,"kind":"TimingOverrun","overrun":300}]),
+      one("fault_numeric",    20261107, [{"step":10,"kind":"NumericSaturation"}]),
+      one("fault_estimator",  20261108, [{"step":10,"kind":"EstimatorDisagreement"}]),
+      one("fault_ctrlsat",    20261109, [{"step":10,"kind":"ControlSaturation"}]),
+      # overrun degrades; two flags per frame keeps it Degraded and bad frames accumulate to Safe
+      one("fault_cascade",    20261110, [{"step":10,"kind":"TimingOverrun","overrun":300},
+                                         {"step":11,"kind":"EstimatorDisagreement"},{"step":11,"kind":"ControlSaturation"},
+                                         {"step":12,"kind":"EstimatorDisagreement"},{"step":12,"kind":"ControlSaturation"},
+                                         {"step":13,"kind":"EstimatorDisagreement"},{"step":13,"kind":"ControlSaturation"}]),
+    ]
+    scenarios=scenarios+suite
     names={"nominal":"fixture_01_nominal.json","faults":"fixture_02_faults.json",
            "final_experiment":"final_experiment.json"}
+    for fx in suite: names[fx["name"]]=fx["name"]+".json"
     for fx in scenarios:
         fx=finalize(pp, fx)
         out=f"{HERE}/fixtures/{names[fx['name']]}"

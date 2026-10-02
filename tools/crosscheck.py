@@ -16,12 +16,21 @@ ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT,"reference"))
 STRICT = "--strict" in sys.argv
 
+# `shape` marks implementations that read the matrices and so must reject a
+# fixture whose declared dimensions disagree with its records. The decision-layer
+# executables read only the flag masks and are not expected to.
 IMPLS = {
-  "ats":   dict(cmd=[f"{ROOT}/ats/build/icarus_sim"],               emits="MHGX"),
-  "idris": dict(cmd=[f"{ROOT}/idris/build/exec/icarus"],            emits="MHGX"),
-  "fstar": dict(cmd=[f"{ROOT}/fstar/out/icarus_decide"],            emits="MH"),
-  "lean":  dict(cmd=[f"{ROOT}/lean/.lake/build/bin/icarus"],        emits="MH"),
+  "ats":   dict(cmd=[f"{ROOT}/ats/build/icarus_sim"],               emits="MHGX", shape=True),
+  "idris": dict(cmd=[f"{ROOT}/idris/build/exec/icarus"],            emits="MHGX", shape=True),
+  "fstar": dict(cmd=[f"{ROOT}/fstar/out/icarus_decide"],            emits="MH",   shape=False),
+  "lean":  dict(cmd=[f"{ROOT}/lean/.lake/build/bin/icarus"],        emits="MH",   shape=False),
 }
+
+def fnv1a(data):
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 def run(cmd, path):
     r=subprocess.run(cmd+[path],capture_output=True,text=True,timeout=120)
@@ -57,12 +66,22 @@ def compare(name, got, ref, emits, tol, tag):
             errs.append(f"{k} differs first at index {i}")
     return errs
 
-def corrupt_variants(path, tmp):
+def with_valid_checksum(lines):
+    body="".join(l+"\n" for l in lines)
+    return body+f"Z {fnv1a(body.encode())}\n"
+
+def corrupt_variants(path, tmp, shape):
     text=open(path).read()
+    lines=[l for l in text.splitlines() if not l.startswith("Z ")]
     flip=text.replace("\nW 3 ","\nW 3 9",1)               # alter a payload, keep Z stale
-    nochk="\n".join(l for l in text.splitlines() if not l.startswith("Z "))+"\n"
+    nochk="\n".join(lines)+"\n"
+    truncated=text[:len(text)//2]                           # cut mid-file: Z line is gone
+    variants=[("payload-flip",flip),("missing-checksum",nochk),("truncated",truncated)]
+    if shape:                                               # checksum is valid, shape is not
+        bad=[("D 3 2 2 "+l.split(" ",4)[4] if l.startswith("D ") else l) for l in lines]
+        variants.append(("wrong-dimensions",with_valid_checksum(bad)))
     out=[]
-    for tag,body in (("payload-flip",flip),("missing-checksum",nochk)):
+    for tag,body in variants:
         p=os.path.join(tmp,f"{tag}.icf"); open(p,"w").write(body); out.append((tag,p))
     return out
 
@@ -90,7 +109,7 @@ def main():
             print(f"[{name:5s}] {os.path.basename(f):28s} {'OK' if not errs else 'FAIL '+'; '.join(errs)}")
             bad+=bool(errs); ran+=1
         with tempfile.TemporaryDirectory() as tmp:
-            for tag,p in corrupt_variants(fixtures[0],tmp):
+            for tag,p in corrupt_variants(fixtures[0],tmp,impl['shape']):
                 rc,out,err=run(impl["cmd"],p)
                 ok = rc==3 and out.lstrip().startswith("REJECT")
                 print(f"[{name:5s}] corrupt:{tag:18s} {'REJECTED ok' if ok else f'FAIL exit={rc} out={out[:40]!r}'}")
