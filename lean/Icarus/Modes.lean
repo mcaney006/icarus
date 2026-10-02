@@ -4,7 +4,7 @@ Abstract mode machine for icarus, specified and proved in Lean. `step` is total;
 that every transition `step` can take is in the table, that Safe/Fault absorb,
 that the critical-health trigger forces Safe from an operational mode, and that
 Safe is inescapable thereafter. Mirrors reference/icarus_ref.py (the `crit`
-trigger corresponds to Health.Unsafe there; `unsafe` is a Lean keyword).
+trigger corresponds to Health.Unsafe there; that name is reserved in Lean).
 -/
 set_option autoImplicit false
 
