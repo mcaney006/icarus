@@ -1,0 +1,4 @@
+# file-glob|pattern-label|reason. Anything forbidden that is not listed here fails make verify.
+idris/src/Main.idr|partial|IO boundary: library readFile loops to EOF; every Icarus.* function is total
+ats/src/pool.dats|$UN|trusted kernel of the lease pool: the four bodies behind the pool.sats signatures
+ats/src/pool.dats|castvwtp|same trusted kernel; clients cannot reach these casts
