@@ -67,5 +67,24 @@ if FSTAR="$($DETECT --path fstar)" && [ -n "$FSTAR" ] && [ -d "$ROOT/fstar/out/c
   else report "fstar/budget_overflow(mutation)" ok; fi
 else echo "[fstar] SKIP (toolchain or out/cache missing; run make -C fstar)"; fi
 
+ats_check() { # type-check one program beside the ATS interface files
+  local d; d="$TMP/ats-$RANDOM"; mkdir -p "$d"
+  cp "$ROOT"/ats/src/*.sats "$d/"; cp "$1" "$d/$(basename "$1")"
+  ( cd "$d" && "$PATSCC" -tcats "$(basename "$1")" 2>&1 )
+}
+
+if PATSCC="$($DETECT --path patscc)" && [ -n "$PATSCC" ] && [ -d "$ROOT/negative/ats" ]; then
+  echo "[ats] negative programs"
+  for f in "$ROOT"/negative/ats/*.dats; do
+    n="$(basename "$f" .dats)"; pat="$(expect_of "$f")"
+    out="$(ats_check "$f")"; rc=$?
+    twin="$(ats_check "$ROOT/negative/ats/ok/$n.dats")"; trc=$?
+    if [ $rc -eq 0 ]; then report "ats/$n" bad "type-checked but must be rejected"
+    elif [ $trc -ne 0 ]; then report "ats/$n" bad "twin failed: $(echo "$twin" | head -2 | tr '\n' ' ')"
+    elif ! echo "$out" | grep -Eq "$pat"; then report "ats/$n" bad "rejected, but message did not match /$pat/: $(echo "$out" | head -2 | tr '\n' ' ')"
+    else report "ats/$n" ok; fi
+  done
+else echo "[ats] SKIP"; fi
+
 echo "negative: $total programs, $fail failures"
 [ $fail -eq 0 ]
