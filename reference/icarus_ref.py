@@ -100,14 +100,15 @@ def _active(faults, k):
 def saturated(raw, lim):
     return any(abs(x)>lim+1e-12 for x in raw)
 
-def run(plant:Plant, fixture:dict, fixed_point:bool=False):
+def run(plant:Plant, fixture:dict, arith=None):
     """Run the deterministic frame loop. Returns (trace, summary)."""
-    arith = FixedPoint(fixture.get("fixed_scale",65536)) if fixed_point else Float()
+    A = arith if arith is not None else Float()
     n,m,p = plant.n, plant.m, plant.p
+    Am,Bm,Cm,Km,Lm = (A.mat(M) for M in (plant.A,plant.B,plant.C,plant.K,plant.L))
     steps = fixture["steps"]
     x    = list(fixture["initial_state"])          # hidden true state
-    xhat = [0.0]*n                                  # estimator starts at origin
-    u_prev=[0.0]*m
+    xhat = A.vec([0.0]*n)                           # estimator starts at origin
+    u_prev=A.vec([0.0]*m)
     last_meas=[0.0]*p
     mode=Mode.Ready
     healthy_streak=0; degraded_bad=0
@@ -143,11 +144,14 @@ def run(plant:Plant, fixture:dict, fixed_point:bool=False):
         last_meas=list(y)
 
         # --- Estimate: Luenberger observer; large innovation flags disagreement -
-        innov = vsub(y, matvec(plant.C, xhat))
-        if vnorm2(innov) > INNOV_THRESH or Fault.EstimatorDisagreement in kinds:
+        yq = A.vec(y)                                 # sensor sample as the controller sees it
+        innov = A.vsub(yq, A.matvec(Cm, xhat))
+        if vnorm2(A.tof(innov)) > INNOV_THRESH or Fault.EstimatorDisagreement in kinds:
             flags.add("estimator")
-        xhat = vadd(vadd(matvec(plant.A,xhat), matvec(plant.B,u_prev)),
-                    matvec(plant.L, innov))
+        xhat = A.vadd(A.vadd(A.matvec(Am,xhat), A.matvec(Bm,u_prev)),
+                      A.matvec(Lm, innov))
+        if Fault.NumericSaturation in kinds:
+            xhat = A.inject_overflow(xhat)
 
         # --- timing / deadline --------------------------------------------------
         frame_cost=sum(STAGE_BUDGET.values())
@@ -159,15 +163,15 @@ def run(plant:Plant, fixture:dict, fixed_point:bool=False):
 
         # --- Control (depends on mode) -----------------------------------------
         if mode in (Mode.Running, Mode.Degraded):
-            raw=vneg(matvec(plant.K, xhat))
+            raw=A.vneg(A.matvec(Km, xhat))
             lim = plant.ctrl_limit if mode==Mode.Running else DEGRADED_CTRL
-            if saturated(raw, lim) or Fault.ControlSaturation in kinds: flags.add("ctrl_sat")
-            u=sat(raw, lim)
+            if saturated(A.tof(raw), lim) or Fault.ControlSaturation in kinds: flags.add("ctrl_sat")
+            u=A.clamp(raw, lim)
         else:
-            u=[0.0]*m
+            u=A.vec([0.0]*m)
 
         # --- Validate: numeric range -------------------------------------------
-        if any((not math.isfinite(a)) or abs(a)>STATE_BOUND for a in xhat) \
+        if any((not math.isfinite(a)) or abs(a)>STATE_BOUND for a in A.tof(xhat)) \
            or Fault.NumericSaturation in kinds:
             flags.add("numeric")
 
@@ -199,23 +203,97 @@ def run(plant:Plant, fixture:dict, fixed_point:bool=False):
 
         healthy_streak = healthy_streak+1 if health==Health.Healthy else 0
 
-        trace.append(FrameRecord(k,mode.value,health.value,list(u),list(y),
-                     list(xhat),list(x),sorted(flags),frame_cost,deadline_miss))
+        trace.append(FrameRecord(k,mode.value,health.value,list(A.tof(u)),list(y),
+                     list(A.tof(xhat)),list(x),sorted(flags),frame_cost,deadline_miss))
         mode=nxt; mode_seq.append(mode.value)
 
         # --- plant update (hidden world) ---------------------------------------
         w=fixture["disturbance"][k]
-        x=vadd(vadd(matvec(plant.A,x), matvec(plant.B,u)), w)
+        x=vadd(vadd(matvec(plant.A,x), matvec(plant.B,A.tof(u))), w)
         u_prev=list(u)
 
     summary={"mode_sequence":mode_seq,
-             "final_state":x,"final_estimate":xhat,"final_mode":mode.value}
+             "final_state":x,"final_estimate":A.tof(xhat),"final_mode":mode.value,
+             "arith":A.stats()}
     return trace, summary
 
-# ----- arithmetic back-ends (float reference vs fixed-point experiment) ---------
-class Float:  pass
-class FixedPoint:
-    def __init__(self, scale): self.scale=scale
+# ----- arithmetic back-ends -----------------------------------------------------
+class Float:
+    """The reference arithmetic: plain IEEE doubles, left-to-right accumulation."""
+    def mat(self, M): return M
+    def vec(self, v): return list(v)
+    def tof(self, v): return v
+    def matvec(self, M, v): return matvec(M, v)
+    def vadd(self, a, b): return vadd(a, b)
+    def vsub(self, a, b): return vsub(a, b)
+    def vneg(self, a): return vneg(a)
+    def clamp(self, v, lim): return sat(v, lim)
+    def inject_overflow(self, v): return v
+    def stats(self): return {}
+
+class FixedArith:
+    """Saturating fixed-point words with SCALE raw units per 1.0 (artificial Q15.16).
+
+    Products are rescaled round-half-up and every accumulation saturates, matching
+    fstar/src/Icarus.Sat.fst operation for operation; `sat_events` counts every time a
+    result had to be clamped. The hidden plant stays in floating point: only the
+    controller side (sensor sample, estimator, control law) is quantised."""
+    SCALE = 65536
+    MIN_RAW = -2147483648
+    MAX_RAW = 2147483647
+
+    def __init__(self):
+        self.sat_events = 0
+        self.ops = 0
+
+    def _clamp(self, r):
+        if r < self.MIN_RAW: self.sat_events += 1; return self.MIN_RAW
+        if r > self.MAX_RAW: self.sat_events += 1; return self.MAX_RAW
+        return r
+
+    def q(self, x):
+        return self._clamp(math.floor(x * self.SCALE + 0.5))
+
+    def mul(self, a, b):
+        self.ops += 1
+        return self._clamp((a * b + 32768) // self.SCALE)
+
+    def add(self, a, b):
+        self.ops += 1
+        return self._clamp(a + b)
+
+    def sub(self, a, b):
+        self.ops += 1
+        return self._clamp(a - b)
+
+    def mat(self, M): return [[self.q(v) for v in row] for row in M]
+    def vec(self, v): return [self.q(x) for x in v]
+    def tof(self, v): return [r / self.SCALE for r in v]
+
+    def matvec(self, M, v):
+        out = []
+        for row in M:
+            acc = 0
+            for a, b in zip(row, v):
+                acc = self.add(acc, self.mul(a, b))
+            out.append(acc)
+        return out
+
+    def vadd(self, a, b): return [self.add(x, y) for x, y in zip(a, b)]
+    def vsub(self, a, b): return [self.sub(x, y) for x, y in zip(a, b)]
+    def vneg(self, a): return [self._clamp(-x) for x in a]
+
+    def clamp(self, v, lim):
+        l = self.q(lim)
+        return [max(-l, min(l, r)) for r in v]
+
+    def inject_overflow(self, v):
+        """A NumericSaturation fault becomes a genuine overflow: a value far outside
+        the representable range is written into the first estimate component."""
+        out = list(v); out[0] = self.q(1.0e5); return out
+
+    def stats(self):
+        return {"sat_events": self.sat_events, "fixed_ops": self.ops}
 
 # ----- self-check (runs with: python3 reference/icarus_ref.py --selfcheck) ------
 def _selfcheck():
@@ -253,7 +331,7 @@ def main(argv=None):
     a=ap.parse_args(argv)
     if a.selfcheck: _selfcheck(); return 0
     plant=load_plant(a.plant); fx=json.load(open(a.fixture))
-    trace,summ=run(plant,fx,fixed_point=a.fixed_point)
+    trace,summ=run(plant,fx,arith=FixedArith() if a.fixed_point else None)
     if a.canonical:
         MC={m:i for i,m in enumerate(["Boot","SelfTest","Calibrating","Ready","Running","Degraded","Safe","Fault"])}
         HC={h:i for i,h in enumerate(["Healthy","Suspect","Degraded","Unsafe"])}
