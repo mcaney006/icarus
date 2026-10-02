@@ -1,5 +1,9 @@
 name = "icarus"
-defaultTargets = ["Icarus"]
+defaultTargets = ["Icarus", "icarus"]
 
 [[lean_lib]]
 name = "Icarus"
+
+[[lean_exe]]
+name = "icarus"
+root = "Main"

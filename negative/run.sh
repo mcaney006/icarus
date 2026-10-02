@@ -86,5 +86,21 @@ if PATSCC="$($DETECT --path patscc)" && [ -n "$PATSCC" ] && [ -d "$ROOT/negative
   done
 else echo "[ats] SKIP"; fi
 
+lean_check() { ( cd "$ROOT/lean" && "$LAKE" env lean "$1" 2>&1 ); }
+
+if LAKE="$($DETECT --path lake)" && [ -n "$LAKE" ] && [ -d "$ROOT/negative/lean" ]; then
+  echo "[lean] negative programs"
+  ( cd "$ROOT/lean" && "$LAKE" build >/dev/null 2>&1 )
+  for f in "$ROOT"/negative/lean/*.lean; do
+    n="$(basename "$f" .lean)"; pat="$(expect_of "$f")"
+    out="$(lean_check "$f")"; rc=$?
+    twin="$(lean_check "$ROOT/negative/lean/ok/$n.lean")"; trc=$?
+    if [ $rc -eq 0 ]; then report "lean/$n" bad "checked but must be rejected"
+    elif [ $trc -ne 0 ]; then report "lean/$n" bad "twin failed: $(echo "$twin" | head -2 | tr '\n' ' ')"
+    elif ! echo "$out" | grep -Eq "$pat"; then report "lean/$n" bad "rejected, but message did not match /$pat/: $(echo "$out" | head -2 | tr '\n' ' ')"
+    else report "lean/$n" ok; fi
+  done
+else echo "[lean] SKIP"; fi
+
 echo "negative: $total programs, $fail failures"
 [ $fail -eq 0 ]
