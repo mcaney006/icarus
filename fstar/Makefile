@@ -30,12 +30,16 @@ extract: verify
 	    || { cat out/log/x$$m.log; exit 1; }; \
 	done
 
+# Warning 8 is silenced: extraction erases the refinements (equal list lengths,
+# discriminator preconditions) under which F* proved those matches exhaustive.
+OCAMLOPT := ocamlfind ocamlopt -w -8 -package fstar.lib -linkpkg
+
 build: extract
 	@opam exec --switch=$(OPAM_SWITCH) -- sh -c \
-	  'OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
+	  'OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH $(OCAMLOPT) \
 	   -I out/ml $(DECIDE_ML:%=out/ml/Icarus_%.ml) driver/driver.ml -o out/icarus_decide && \
-	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
+	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH $(OCAMLOPT) \
 	   -I out/ml $(SAT_ML:%=out/ml/Icarus_%.ml) driver/driver_sat.ml -o out/icarus_sat && \
-	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
+	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH $(OCAMLOPT) \
 	   -I out/ml $(COST_ML:%=out/ml/Icarus_%.ml) driver/driver_cost.ml -o out/icarus_cost'
 	@echo "[fstar] built out/icarus_decide out/icarus_sat out/icarus_cost"
