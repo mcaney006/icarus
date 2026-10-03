@@ -33,6 +33,7 @@ The only data that crosses a language boundary is the ICF 2 file format
 | Control u = sat(−K x̂) | `Controller.control` | `clampAll` in `frame` | `Sat.clamp` (fixed-point word) | `clamp_all` | `A.clamp` |
 | Mode | `Modes.Mode` | `Mode.Mode` | `Icarus.Mode.mode` | static int 0–7 | `Mode` enum |
 | Legal transition | `Modes.legal` (Bool) | `Legal m m'` (type family) | `legal` (bool, in `decide`'s return type) | `dataprop LEGAL(m, m1)` | `LEGAL` table |
+| Fault kind | `Faults.FaultKind` | `Plant.FaultKind` | — (sees flags only) | int code from the fixture | `Fault` enum |
 | Health | `Faults.Health` | `Plant.Health` | `Icarus.Health.health` | int 0–3 | `Health` enum |
 | Fault flags | `Faults.Flags` | `Plant.Flags` | `Icarus.Health.flags` | bit mask int | `set` of names |
 | Classification | `Faults.classify` | `Plant.classify` | `Icarus.Health.classify` | `classify` (mode.dats) | Health block |
