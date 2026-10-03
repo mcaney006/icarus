@@ -1,0 +1,70 @@
+# Mirrors TOOLCHAINS.md on the same platform (Apple silicon). `make ci` fails if any
+# toolchain is missing, a proof or type check fails, a negative program compiles,
+# a fixture regenerates differently, or any implementation disagrees with the
+# reference. Nothing is allowed to skip.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      FSTAR_VERSION: v2026.09.27
+      LEAN_TOOLCHAIN: leanprover/lean4:v4.34.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Homebrew toolchains
+        run: |
+          brew install idris2 ats2-postiats elan-init opam
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Python with numpy
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy
+
+      - name: Lean
+        run: |
+          elan toolchain install "$LEAN_TOOLCHAIN"
+          elan default "$LEAN_TOOLCHAIN"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: F*
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/fstar.tgz" \
+            "https://github.com/FStarLang/FStar/releases/download/$FSTAR_VERSION/fstar-$FSTAR_VERSION-Darwin-arm64.tar.gz"
+          mkdir -p "$HOME/.local/opt"
+          tar xzf "$RUNNER_TEMP/fstar.tgz" -C "$HOME/.local/opt/"
+
+      - name: Cache opam switch
+        uses: actions/cache@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-${{ hashFiles('tools/setup-ocaml-switch.sh') }}
+
+      - name: OCaml 5.3.0 switch for F* extraction
+        run: |
+          [ -d "$HOME/.opam" ] || opam init --bare --yes --disable-sandboxing
+          bash tools/setup-ocaml-switch.sh
+
+      - name: Toolchain table
+        run: make toolchains
+
+      - name: make ci
+        run: make ci
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            fstar/out/log/
+            lean/.lake/build/
+          if-no-files-found: ignore

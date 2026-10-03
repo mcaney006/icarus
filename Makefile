@@ -5,7 +5,7 @@ DETECT := bash tools/detect-toolchains.sh
 PY := $(or $(shell bash tools/detect-toolchains.sh --path python3),python3)
 
 .PHONY: bootstrap build test verify simulate crosscheck satcheck experiments benchmark clean ci audit \
-        toolchains reference lean idris fstar ats negative fixtures
+        toolchains reference lean idris fstar ats negative fixtures selftest format
 
 toolchains:
 	@$(DETECT)
@@ -59,8 +59,12 @@ simulate:
 	@if [ -f ats/Makefile ] && [ -n "$$($(DETECT) --path patscc)" ]; then $(MAKE) -C ats simulate; \
 	else echo "[sim] running python reference"; $(PY) reference/icarus_ref.py --fixture fixtures/final_experiment.json --trace; fi
 
+selftest:
+	@set -o pipefail; if [ -x idris/build/exec/icarus ]; then idris/build/exec/icarus --selftest | tail -1; else echo "[idris] SKIP selftest (not built)"; fi
+	@set -o pipefail; if [ -x ats/build/icarus_selftest ]; then ats/build/icarus_selftest | tail -1; else echo "[ats]   SKIP selftest (not built)"; fi
+
 crosscheck:
-	@$(PY) tools/crosscheck.py
+	@$(PY) tools/crosscheck.py $(STRICT)
 
 satcheck:
 	@$(PY) tools/satcheck.py
@@ -71,13 +75,20 @@ experiments:
 benchmark:
 	@if [ -f tools/benchmark.py ]; then $(PY) tools/benchmark.py; else echo "[bench] SKIP (not implemented)"; fi
 
-test: reference crosscheck satcheck
+test: reference selftest crosscheck satcheck
 	@echo "test complete."
+
+# Whitespace errors (trailing blanks, space-before-tab, blank line at EOF) in tracked files.
+# None of the four languages has a formatter stable enough to enforce.
+format:
+	@git diff --check $$(git hash-object -t tree /dev/null) HEAD && echo "format: clean"
 
 # Strict gate for CI: every toolchain must be present and every stage must pass.
 ci:
 	@$(DETECT) --require-all || { echo "CI: a required toolchain is missing"; exit 1; }
-	@$(MAKE) bootstrap build verify test
+	@$(MAKE) format bootstrap
+	@git diff --exit-code --stat fixtures/ || { echo "CI: regenerated fixtures differ from the committed ones"; exit 1; }
+	@$(MAKE) build verify test simulate STRICT=--strict
 
 clean:
 	@rm -rf dist lean/.lake lean/build idris/build fstar/out fstar/.cache ats/build fstar/driver/*.cm[iox] fstar/driver/*.o
