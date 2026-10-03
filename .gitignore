@@ -13,6 +13,8 @@ idris/build/
 **/*.krml
 fstar/.cache/
 fstar/out/
+fstar/driver/*.cm[iox]
+fstar/driver/*.o
 
 # ATS (generated C + binaries)
 **/*_dats.c

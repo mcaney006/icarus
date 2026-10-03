@@ -3,10 +3,11 @@
 FSTAR ?= fstar.exe
 OPAM_SWITCH ?= icarus-fstar
 FSTAR_HOME ?= $(HOME)/.local/opt/fstar
-MODULES := Health Mode Sat Vote Counter Timing Ring Wire Decide SatCheck
-EXTRACT := Health Mode Wire Decide Sat SatCheck
+MODULES := Health Mode Sat Vote Counter Timing Ring Wire Decide SatCheck Cost CostReport
+EXTRACT := Health Mode Wire Decide Sat SatCheck Timing Cost CostReport
 DECIDE_ML := Health Mode Wire Decide
 SAT_ML := Wire Sat SatCheck
+COST_ML := Timing Cost Wire CostReport
 CACHE := out/cache
 FLAGS := --include src --cache_checked_modules --cache_dir $(CACHE)
 
@@ -34,5 +35,7 @@ build: extract
 	  'OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
 	   -I out/ml $(DECIDE_ML:%=out/ml/Icarus_%.ml) driver/driver.ml -o out/icarus_decide && \
 	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
-	   -I out/ml $(SAT_ML:%=out/ml/Icarus_%.ml) driver/driver_sat.ml -o out/icarus_sat'
-	@echo "[fstar] built out/icarus_decide out/icarus_sat"
+	   -I out/ml $(SAT_ML:%=out/ml/Icarus_%.ml) driver/driver_sat.ml -o out/icarus_sat && \
+	   OCAMLPATH=$(FSTAR_HOME)/lib:$$OCAMLPATH ocamlfind ocamlopt -package fstar.lib -linkpkg \
+	   -I out/ml $(COST_ML:%=out/ml/Icarus_%.ml) driver/driver_cost.ml -o out/icarus_cost'
+	@echo "[fstar] built out/icarus_decide out/icarus_sat out/icarus_cost"

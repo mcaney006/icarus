@@ -80,7 +80,7 @@ ci:
 	@$(MAKE) bootstrap build verify test
 
 clean:
-	@rm -rf dist lean/.lake lean/build idris/build fstar/out fstar/.cache ats/build
+	@rm -rf dist lean/.lake lean/build idris/build fstar/out fstar/.cache ats/build fstar/driver/*.cm[iox] fstar/driver/*.o
 	@find . -name '*.checked' -delete 2>/dev/null; true
 	@find . -name '*_dats.c' -o -name '*_sats.c' | xargs rm -f 2>/dev/null; true
 	@echo "clean complete."
