@@ -56,7 +56,7 @@ STATE_BOUND  = 1.0e3   # |state component| above this (or non-finite) is Unsafe
 CTRL_LIMIT   = 1.0     # abstract actuator interval is [-CTRL_LIMIT, CTRL_LIMIT]
 DEGRADED_CTRL= 0.5     # reduced authority while Degraded
 RECOVERY_FRAMES = 3    # consecutive Healthy frames needed Degraded -> Running
-DEGRADED_LIMIT  = 3    # consecutive Degraded frames forcing Degraded -> Safe
+DEGRADED_LIMIT  = 3    # non-Healthy frames in one Degraded episode forcing Degraded -> Safe
 STUCK_VALUE  = 7.0     # value a stuck synthetic channel reports
 
 FRAME_BUDGET = 1000

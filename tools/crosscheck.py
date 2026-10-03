@@ -7,8 +7,10 @@ the lines it declares it emits: M, H, G exactly, X within the fixture tolerance
 T. Implementations that own only the discrete decision layer (Lean, F*) emit M
 and H; the full-numerics simulators (Idris, ATS) emit all four.
 
-Also applies two corruption mutations to a fixture and requires every
-implementation to reject each (exit code 3 and a REJECT line).
+Also applies corruption variants to the first fixture (payload flip, missing
+checksum, truncation, and for the shape-checking implementations a wrong
+dimension with a valid checksum) and requires every implementation to reject
+each (exit code 3 and a REJECT line).
 """
 import glob, os, subprocess, sys, shutil, tempfile
 
