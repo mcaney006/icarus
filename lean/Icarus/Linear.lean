@@ -46,10 +46,6 @@ theorem sumFin_zero (n : Nat) : Mat.sumFin n (fun _ => 0) = 0 := by
   | zero => rfl
   | succ k ih => simp [Mat.sumFin, ih]
 
-/-- `A x` always has exactly `r` components, whatever `A`, `x` are. -/
-theorem mulVec_dim {r c : Nat} (m : Mat r c) (v : Vec c) :
-    ∃ w : Vec r, Mat.mulVec m v = w := ⟨_, rfl⟩
-
 theorem zero_mulVec {r c : Nat} (v : Vec c) :
     Mat.mulVec (Mat.zero r c) v = Vec.zero r := by
   funext i; simp [Mat.mulVec, Mat.zero, Vec.zero, sumFin_zero]
