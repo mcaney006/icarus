@@ -1,0 +1,275 @@
+{
+  "machine": {
+    "os": "Darwin 27.2.0",
+    "machine": "arm64",
+    "cpu": "Apple M5",
+    "python": "3.9.6"
+  },
+  "repeats": 5,
+  "rebuild": [
+    {
+      "lang": "lean",
+      "stage": "check+build (lake build: elaboration and kernel checking of every proof, plus the executable)",
+      "seconds": 6.660246666
+    },
+    {
+      "lang": "idris",
+      "stage": "check+build (type checking and Chez Scheme code generation)",
+      "seconds": 1.8815224169999993
+    },
+    {
+      "lang": "fstar",
+      "stage": "check (verify all modules with Z3)",
+      "seconds": 3.8801172919999996
+    },
+    {
+      "lang": "fstar",
+      "stage": "build (OCaml extraction, compilation and linking)",
+      "seconds": 4.86546575
+    },
+    {
+      "lang": "ats",
+      "stage": "check (patscc -tcats on every .dats: linear and dependent type checking)",
+      "seconds": 1.615366292000001
+    },
+    {
+      "lang": "ats",
+      "stage": "check+build (patsopt to C, clang -O2, link; three executables)",
+      "seconds": 5.127214374999998
+    }
+  ],
+  "micro": [
+    {
+      "lang": "ats",
+      "op": "vadd4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 3.0802,
+      "ops_per_sec": 324654243.23095906,
+      "ns_min": 2.7862,
+      "ns_max": 4.359,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "dot4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 1.6201,
+      "ops_per_sec": 617245849.0216653,
+      "ns_min": 1.5991,
+      "ns_max": 1.6756,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "matvec4x4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 8.0478,
+      "ops_per_sec": 124257561.07259127,
+      "ns_min": 7.9559,
+      "ns_max": 8.3561,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "matmul4x4",
+      "iterations": 1000000,
+      "runs": 5,
+      "ns_per_op": 26.6,
+      "ops_per_sec": 37593984.96240602,
+      "ns_min": 25.857,
+      "ns_max": 26.796,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "ring_push_peek",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 2.8163,
+      "ops_per_sec": 355075808.68515426,
+      "ns_min": 2.8141,
+      "ns_max": 2.8639,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "mode_decide",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 1.9499,
+      "ops_per_sec": 512846812.6570594,
+      "ns_min": 1.9202,
+      "ns_max": 1.9779,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "ats",
+      "op": "frame",
+      "iterations": 960000,
+      "runs": 5,
+      "ns_per_op": 106.040625,
+      "ops_per_sec": 9430348.038782306,
+      "ns_min": 104.91875,
+      "ns_max": 110.46354166666667,
+      "alloc_per_op": 0.0,
+      "alloc_unit": "allocator calls"
+    },
+    {
+      "lang": "idris",
+      "op": "vadd4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 13.8975,
+      "ops_per_sec": 71955387.65965103,
+      "ns_min": 13.6476,
+      "ns_max": 17.237,
+      "alloc_per_op": 192.0157904,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "dot4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 27.9813,
+      "ops_per_sec": 35738153.695503786,
+      "ns_min": 25.676,
+      "ns_max": 36.7166,
+      "alloc_per_op": 352.0289312,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "matvec4x4",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 114.02,
+      "ops_per_sec": 8770391.15944571,
+      "ns_min": 110.1681,
+      "ns_max": 135.1293,
+      "alloc_per_op": 1440.1184048,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "matmul4x4",
+      "iterations": 1000000,
+      "runs": 5,
+      "ns_per_op": 523.707,
+      "ops_per_sec": 1909464.6433979303,
+      "ns_min": 508.924,
+      "ns_max": 759.227,
+      "alloc_per_op": 6688.551488,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "ring_push_peek",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 63.2254,
+      "ops_per_sec": 15816428.207650723,
+      "ns_min": 60.6505,
+      "ns_max": 71.5578,
+      "alloc_per_op": 304.0269904,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "mode_decide",
+      "iterations": 10000000,
+      "runs": 5,
+      "ns_per_op": 17.2821,
+      "ops_per_sec": 57863338.36744377,
+      "ns_min": 16.8106,
+      "ns_max": 21.5815,
+      "alloc_per_op": 16.0014304,
+      "alloc_unit": "bytes (Chez sstats)"
+    },
+    {
+      "lang": "idris",
+      "op": "frame",
+      "iterations": 96000,
+      "runs": 5,
+      "ns_per_op": 1338.7916666666667,
+      "ops_per_sec": 746942.2053468613,
+      "ns_min": 1271.5625,
+      "ns_max": 1583.1041666666667,
+      "alloc_per_op": 10800.9465,
+      "alloc_unit": "bytes (Chez sstats)"
+    }
+  ],
+  "e2e": [
+    {
+      "impl": "reference",
+      "scope": "full simulation (Python oracle)",
+      "runs": 10,
+      "median_ms": 90.948228999995,
+      "min_ms": 85.40716699999962,
+      "max_ms": 97.23479200000185
+    },
+    {
+      "impl": "ats",
+      "scope": "full simulation",
+      "runs": 10,
+      "median_ms": 3.4658334999981832,
+      "min_ms": 2.8508750000000305,
+      "max_ms": 63.66308300000156
+    },
+    {
+      "impl": "idris",
+      "scope": "full simulation",
+      "runs": 10,
+      "median_ms": 89.89575000000372,
+      "min_ms": 52.650833999997815,
+      "max_ms": 416.30566699999605
+    },
+    {
+      "impl": "fstar",
+      "scope": "decision layer only",
+      "runs": 10,
+      "median_ms": 7.211291500002659,
+      "min_ms": 6.123541000000898,
+      "max_ms": 110.46366599999402
+    },
+    {
+      "impl": "lean",
+      "scope": "decision layer only",
+      "runs": 10,
+      "median_ms": 4.627479500001641,
+      "min_ms": 3.93125000000083,
+      "max_ms": 155.59133299999672
+    }
+  ],
+  "sizes": [
+    {
+      "impl": "ats",
+      "path": "ats/build/icarus_sim",
+      "bytes": 58312
+    },
+    {
+      "impl": "idris",
+      "path": "idris/build/exec/icarus_app",
+      "bytes": 292168
+    },
+    {
+      "impl": "fstar",
+      "path": "fstar/out/icarus_decide",
+      "bytes": 3791120
+    },
+    {
+      "impl": "lean",
+      "path": "lean/.lake/build/bin/icarus",
+      "bytes": 2469904
+    }
+  ]
+}

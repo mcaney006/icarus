@@ -9,8 +9,10 @@ staload "./sim.sats"
 
 %{^
 extern long icarus_alloc_calls(void);
+extern long icarus_now_ns(void);
 %}
 extern fun alloc_calls (): lint = "mac#icarus_alloc_calls"
+extern fun now_ns (): lint = "mac#icarus_now_ns"
 
 (* Artificial constants, shared with reference/icarus_ref.py. *)
 #define MEAS_LIMIT 50.0
@@ -335,3 +337,22 @@ implement run_sim (cfg) = let
   in end
   val () = st_free(st)
 in after - before end
+
+implement sim_bench (cfg, reps) = let
+  fun go (cfg: !cfg_vt, r: int, ns: lint, al: lint): @(lint, lint) =
+    if r > 0 then let
+      val steps = (let val @CFG(_, _, _, _, _, _, _, _, s, _) = cfg val v = s prval () = fold@(cfg) in v end): int
+      val st = (let val @CFG(_, _, _, _, _, _, _, x0, _, _) = cfg val s0 = st_make(x0) prval () = fold@(cfg) in s0 end)
+      val pm = pool_make(2)
+      val pu = pool_make(2)
+      val ps = pool_make(2)
+      val a0 = alloc_calls()
+      val t0 = now_ns()
+      val @(pm1, pu1, ps1) = frames(cfg, st, 0, steps, pm, pu, ps)
+      val t1 = now_ns()
+      val a1 = alloc_calls()
+      val () = (pool_free(pm1); pool_free(pu1); pool_free(ps1))
+      val () = st_free(st)
+    in go(cfg, r - 1, ns + (t1 - t0), al + (a1 - a0)) end
+    else @(ns, al)
+in go(cfg, reps, 0L, 0L) end

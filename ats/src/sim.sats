@@ -5,3 +5,7 @@
 staload "./fixture.sats"
 
 fun run_sim (cfg: !cfg_vt): lint
+
+(* Runs the frame loop `reps` times from the fixture's initial state, timing only
+   the loop. Returns (nanoseconds, allocator calls) summed over the timed regions. *)
+fun sim_bench (cfg: !cfg_vt, reps: int): @(lint, lint)
