@@ -2,7 +2,7 @@
 # coordinates them and skips (never silently passes) a missing toolchain.
 SHELL := /bin/bash
 DETECT := bash tools/detect-toolchains.sh
-PY := python3
+PY := $(or $(shell bash tools/detect-toolchains.sh --path python3),python3)
 
 .PHONY: bootstrap build test verify simulate crosscheck satcheck experiments benchmark clean ci audit \
         toolchains reference lean idris fstar ats negative fixtures

@@ -14,7 +14,10 @@ resolve() {
     patscc)  _first "$(command -v patscc 2>/dev/null)" "$BREW_BIN/patscc" ;;
     patsopt) _first "$(command -v patsopt 2>/dev/null)" "$BREW_BIN/patsopt" ;;
     fstar)   _first "$(command -v fstar.exe 2>/dev/null)" "$FSTAR_LOCAL" ;;
-    python3) _first "$(command -v python3 2>/dev/null)" ;;
+    python3) # fixture generation and the experiment need numpy; the first python3 that has it
+      for c in "$(command -v python3 2>/dev/null)" "$BREW_BIN/python3"; do
+        if [ -n "$c" ] && [ -x "$c" ] && "$c" -c 'import numpy' 2>/dev/null; then printf '%s' "$c"; return 0; fi
+      done ;;
     lake|lean)
       local elan; elan="$(command -v elan 2>/dev/null || echo "$BREW_BIN/elan")"
       if [ -x "$elan" ]; then "$elan" which "$1" 2>/dev/null; fi ;;
@@ -31,7 +34,7 @@ version() {
     fstar)   "$p" --version 2>/dev/null | head -1 ;;
     lake)    "$p" --version 2>/dev/null | head -1 ;;
     lean)    "$p" --version 2>/dev/null | head -1 ;;
-    python3) "$p" --version 2>/dev/null | head -1 ;;
+    python3) "$p" -c 'import sys, numpy; print("Python", sys.version.split()[0], "numpy", numpy.__version__)' ;;
   esac
 }
 
