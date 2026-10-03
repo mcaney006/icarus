@@ -1,75 +1,78 @@
 # icarus
 
-icarus is a formal-methods laboratory for a deliberately artificial, unstable
-discrete-time control system implemented across **ATS**, **Idris 2**, **F\***, and
-**Lean 4**. It exists to examine how dependent types, linear types, refinement
-types, and theorem proving each eliminate a different class of control-software
-defect *before* execution, and to measure where those guarantees overlap.
+icarus is a formal-methods laboratory for a deliberately artificial unstable
+discrete-time control system implemented across ATS, Idris 2, F\*, and Lean 4.
+It exists to examine how dependent types, linear types, refinement types, and
+theorem proving can eliminate classes of control-software defects before
+execution.
 
-> **This is not flight software.** It cannot and must not be used to control any
-> physical rocket, missile, aircraft, drone, or launch vehicle. The plant is
-> dimensionless, every constant is synthetic and chosen for mathematical
-> testing, and there are no sensors, actuators, drivers, or hardware interfaces
-> of any kind. The nearest thing to "reality" here is a `.json` fixture. See
-> [REPORT.md](REPORT.md) §2 for why the system is intentionally nonphysical.
+> **Not flight software. Not suitable for physical vehicle control.** The plant
+> is dimensionless, every constant is synthetic, and there are no sensors,
+> actuators, drivers or hardware interfaces. REPORT.md §2 explains why.
 
-## The system under study
-
-A generic linear discrete-time plant with synthetic matrices:
+## The system
 
 ```
-x[k+1] = A x[k] + B u[k] + w[k]      (abstract state evolution)
-y[k]   = C x[k] + v[k]               (synthetic measurement)
-u[k]   = sat(-K x_hat[k])            (abstract stabilising feedback, clamped)
-x_hat  = observer(y, u)              (abstract deterministic state estimate)
+x[k+1] = A x[k] + B u[k] + w[k]     synthetic unstable plant, 4 states
+y[k]   = C x[k] + v[k]              2 measurements, each from 3 voted channels
+x̂      = observer(y, u)             Luenberger observer
+u[k]   = sat(-K x̂[k]) ∈ [-1, 1]     2 controls
 ```
 
-`x` is a dimensionless state (position-like, rate-like, orientation-like,
-angular-rate-like terms with **no** physical geometry attached), `u` an abstract
-control in `[-1, 1]`, `w`/`v` synthetic disturbance and noise. The open-loop
-`A` is unstable by construction; the point is to study the *software*, not to
-stabilise anything real.
+The loop also includes:
+
+- a health monitor (Healthy, Suspect, Degraded, Unsafe)
+- an eight-mode state machine
+- a 1000-tick cyclic executive with stage budgets
+- typed injection of ten fault kinds
 
 ## Who owns what
 
-| Language | Owns | Guarantee it contributes |
-|----------|------|--------------------------|
-| **Lean 4** | mathematical specification + proofs | the model's properties are *true* (dimension, mode closure, bounded arithmetic, invariants) |
-| **Idris 2** | dependently-typed executable domain model | illegal dimensions and illegal mode transitions *do not typecheck* |
-| **F\***    | refinement-typed data structures + state machines | buffers, counters, timing budgets satisfy *explicit postconditions* |
-| **ATS**    | linear-typed deterministic simulation runtime | fixed-capacity resources, no GC in the loop, each resource consumed *once* |
+| Language | Owns |
+|---|---|
+| Lean 4 | mathematical specification and proofs (over ℤ) |
+| Idris 2 | dimension-indexed executable model; illegal shapes, units and transitions do not typecheck |
+| F\* | refinement-verified arithmetic, voting, ring buffer, timing ledger, health and mode manager, cost model |
+| ATS2 | linear, fixed-capacity simulation runtime with no allocation in the frame loop |
+| Python | the oracle every executable is compared against |
 
-The same toy system is built four times, on purpose. The research question is
-*which class of defect each discipline makes unrepresentable.*
+## Status
+
+- `make ci` passes locally.
+- 72 Lean theorems and 59 F\* lemmas and checked facts.
+- 24 negative programs, all rejected.
+- 0 unlisted proof holes.
+- ATS, Idris, F\* and Lean match the oracle on 13 fixtures plus corruption
+  variants: 66 runs, 0 failures.
+
+Read PROOFS.md for exactly what is checked, ASSUMPTIONS.md for what it rests on,
+and REPORT.md §12 for what is not proved. The biggest gap is that nothing proves
+stability or anything about floating point.
+
+## Build
+
+```bash
+make bootstrap    # detect toolchains, regenerate fixtures
+make build        # build all four implementations
+make verify       # proofs, type checks, negative programs, hole audit
+make test         # self-tests, cross-check, fixed-point vs F* arithmetic
+make simulate     # ATS simulation of the final experiment
+make benchmark    # docs/results/benchmark.md
+make ci           # all of the above; fails on any missing toolchain or skip
+```
+
+Toolchains and versions: TOOLCHAINS.md. Results: docs/results/. Final
+experiment trace: docs/FINAL_EXPERIMENT.md. Correspondence across languages:
+spec/CORRESPONDENCE.md.
 
 ## Layout
 
 ```
-spec/            cross-language concept correspondence
-fixtures/        deterministic interchange files (plant + scenarios)
-reference/       Python executable oracle (defines expected behaviour)
-lean/   idris/   fstar/   ats/     the four implementations
-negative/        programs that MUST fail to compile (one per discipline)
-tools/           toolchain detection + fixture generation + cross-check
-PROOFS.md        every formal claim, its status, and its runnable counterpart
-ASSUMPTIONS.md   every assumption the proofs rest on
-TOOLCHAINS.md    pinned toolchain versions + how they were obtained
-REPORT.md        the research write-up
+lean/ idris/ fstar/ ats/   the four implementations
+reference/                 Python oracle
+fixtures/                  deterministic scenarios (JSON and ICF)
+spec/                      interchange format, cross-language correspondence
+negative/                  programs each type checker must reject
+tools/                     fixture generation, cross-check, experiments, benchmark, audit
+docs/                      final experiment trace, measured results
 ```
-
-## Build
-
-```
-make bootstrap    # detect toolchains, generate fixtures
-make build        # compile every implementation whose toolchain is present
-make test         # unit + fixture tests
-make verify       # run the provers / type-checkers (proofs + negative tests)
-make simulate     # run the reference + ATS simulation on a fixture
-make crosscheck   # compare all implementations against the reference
-make benchmark    # micro-benchmarks
-make clean
-```
-
-Missing toolchains are reported and skipped, never silently passed. See
-[TOOLCHAINS.md](TOOLCHAINS.md) for versions and [PROOFS.md](PROOFS.md) for what
-is actually mechanically checked today.
