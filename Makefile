@@ -18,7 +18,7 @@ bootstrap: toolchains fixtures
 
 reference:
 	@if [ ! -f reference/icarus_ref.py ]; then echo "[ref]   SKIP (not implemented)"; \
-	else $(PY) -m py_compile reference/icarus_ref.py && echo "[ref]   compiles"; fi
+	else $(PY) reference/icarus_ref.py --selfcheck; fi
 
 lean:
 	@LAKE=$$($(DETECT) --path lake); \

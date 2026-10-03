@@ -12,7 +12,7 @@ Nothing here is physical. State components are dimensionless; the matrices are
 synthetic constants from tools/gen_fixtures.py.
 """
 from __future__ import annotations
-import argparse, json, math, sys
+import argparse, random, json, math, sys
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -313,6 +313,12 @@ def _selfcheck():
     assert sum(STAGE_BUDGET.values())<=FRAME_BUDGET, "budget overflow"
     assert median3(100.0,1.0,1.0)==1.0, "single divergent channel dominated median"
     assert median3(1.0,2.0,3.0)==2.0
+    # selection is exact on doubles: the vote is always one of the inputs, the middle one
+    rng=random.Random(20261002)
+    for _ in range(20000):
+        t=[rng.choice([rng.uniform(-1e6,1e6), rng.uniform(-1,1)*1e-300, 0.0, -0.0, 1e308]) for _ in range(3)]
+        m=median3(*t)
+        assert m in t and m==sorted(t)[1], f"median3{tuple(t)}={m}"
     assert summ["mode_sequence"][0]=="Ready" and summ["mode_sequence"][1]=="Running"
     # closed loop with stable gains must shrink the state
     assert vnorm2(summ["final_state"])<vnorm2(fx["initial_state"]), "did not converge"

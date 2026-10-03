@@ -1,8 +1,9 @@
 (* Three-channel median voting on a totally ordered value. The median is
    *selected*, never computed, so identical healthy channels vote to exactly
    their common value. The theorems are about integer (fixed-point) channels,
-   which are totally ordered; they presuppose no NaN. IEEE doubles are covered by
-   the property test in tools/ and by the Lean statement over Int. *)
+   which are totally ordered; they presuppose no NaN. The double implementations
+   use the same selection formula and are covered only by the 20,000-triple
+   property check in `reference/icarus_ref.py --selfcheck`. *)
 module Icarus.Vote
 
 let med (a b c:int) : int = FStar.Math.Lib.max (FStar.Math.Lib.min a b)
