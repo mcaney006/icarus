@@ -49,6 +49,9 @@ All Lean statements are over `Int` (A3).
 | Three non-Healthy frames in one Degraded episode force Safe | `Decision.repeated_bad_to_safe` | proved | — | self-test "mode: repeated bad frames -> Safe"; crosscheck `fault_cascade` |
 | From an operational mode the loop never re-enters Boot, SelfTest or Calibrating | `Decision.decide_operational`, `runFrames_operational`, `never_boot` | proved | A10 | crosscheck `M` lines |
 | In operational modes, `decide` is the abstract machine `step` under a derived trigger | `Decision.decide_is_step` | proved (operational modes only) | A10 | — |
+| History buffer: length never exceeds capacity and saturates at it; a fresh buffer is empty | `Ring.len_le_cap`, `push_len`, `push_len_saturates`, `empty_len` | proved | — | ring self-tests (ATS, Idris) |
+| History reads need `age < len`; the newest read is the last push, and older entries shift by one per push | `Ring.get`, `get_newest`, `get_older` | proved | — | `negative/lean/ring_unwritten_read.lean`; ring self-tests |
+| After any pushes the buffer holds exactly the most recent `cap` values newest-first; every value read was written, in reverse write order | `Ring.pushAll_slots`, `read_was_written`, `read_order` | proved | — | ring self-tests "ring: oldest retained …" |
 | Control `sat(−K x̂)` is bounded for every gain and estimate, and idempotent | `Controller.control_bounded`, `control_idempotent` | proved | A3 | crosscheck |
 | Without disturbance or noise, observer error obeys `e⁺ = (A − LC) e`, independent of u | `Controller.observer_error` | proved | A3 | — |
 

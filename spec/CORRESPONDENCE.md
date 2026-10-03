@@ -39,7 +39,7 @@ The only data that crosses a language boundary is the ICF 2 file format
 | Decision state | `Decision.Monitor` | `Sim` (mode, healthy, bad) | `Icarus.Mode.st` | `ctl` array in `st_vt` | locals `mode`, `healthy_streak`, `degraded_bad` |
 | Decision function | `Decision.decide` | `Plant.decideMode` | `Icarus.Mode.decide` | `decide_mode` | Decide block |
 | Three-channel vote | — | `Plant.median3` | `Icarus.Vote.med` (over `int`) | `median3` | `median3` |
-| History buffer | — | `Ring (S c) a` | `ring a cap` | `ring_vt(cap)` | — |
+| History buffer | `Ring.Ring α cap` (newest-first list model) | `Ring (S c) a` | `ring a cap` | `ring_vt(cap)` | — |
 | Frame timing | `Numeric.stageBudgets` | `stageSum`, `frameBudget` | `Icarus.Timing` | `900 + over > 1000` | `STAGE_BUDGET`, `FRAME_BUDGET` |
 | Units | — | `Dim.Quantity` (dimension-indexed) | — | — | — |
 | Buffer ownership | — | — | — | `pool_vt(n, avail)` linear leases | — |
