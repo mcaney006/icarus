@@ -10,7 +10,7 @@ is the strict gate CI uses.
 | F\*       | `2026.09.27` (Darwin_arm64) | prebuilt release tarball → `~/.local/opt/fstar` | `~/.local/opt/fstar/bin/fstar.exe` |
 | Idris 2   | `0.8.0`          | `brew install idris2` | `idris2` |
 | ATS2 / Postiats | `0.4.2`    | `brew install ats2-postiats` | `patsopt`, `patscc` |
-| Python    | 3.9+ with numpy (tested 3.14.7, numpy 2.5.3) | Homebrew | first `python3` on `PATH` that imports numpy, else `/opt/homebrew/bin/python3` |
+| Python    | 3.9+; numpy for fixture generation and the experiment (tested 3.14.7 with numpy 2.5.3; reference and cross-check also on 3.9.6) | Homebrew | first `python3` on `PATH` that imports numpy, else `/opt/homebrew/bin/python3` |
 | OCaml     | `5.3.0` in opam switch `icarus-fstar` | `brew install opam`, then `bash tools/setup-ocaml-switch.sh` | `opam exec --switch=icarus-fstar` (F\* extraction only) |
 
 ## Notes

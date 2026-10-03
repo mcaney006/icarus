@@ -322,6 +322,10 @@ differ. The numbers say nothing about the languages in general.
 
 ## 11. Limitations
 
+- **Fixed point exists only in the reference.** The fixed-point frame loop
+  runs only in the Python reference. Its primitives agree exactly with the
+  verified F\* `Sat` operations on 6972 vectors, but no verified language runs
+  the whole loop in fixed point.
 - **Small and fixed.** The system has n = 4, m = 2 and p = 2. ATS hard-codes
   these sizes. The checks do not cover larger systems.
 - **Start-up not simulated.** Boot, SelfTest and Calibrating appear in every
