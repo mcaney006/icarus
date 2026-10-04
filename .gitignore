@@ -1,14 +1,11 @@
-# Lean 4 / Lake
 lean/.lake/
 lean/build/
 lean/lakefile.olean
 
-# Idris 2
 idris/build/
 **/*.ttc
 **/*.ttm
 
-# F*
 **/*.checked
 **/*.krml
 fstar/.cache/
@@ -16,18 +13,14 @@ fstar/out/
 fstar/driver/*.cm[iox]
 fstar/driver/*.o
 
-# ATS (generated C + binaries)
 **/*_dats.c
 **/*_sats.c
 ats/build/
 
-# Python
 **/__pycache__/
 **/*.pyc
 
-# Build orchestration
 dist/
 tools/.toolchains.env
 
-# OS
 .DS_Store

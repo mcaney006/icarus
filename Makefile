@@ -1,11 +1,15 @@
-# icarus top-level orchestration. Each language keeps its own build tool; this
-# coordinates them and skips (never silently passes) a missing toolchain.
 SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
 DETECT := bash tools/detect-toolchains.sh
-PY := $(or $(shell bash tools/detect-toolchains.sh --path python3),python3)
+PY := $(or $(shell $(DETECT) --path python3),python3)
 
-.PHONY: bootstrap build test verify simulate crosscheck satcheck experiments benchmark clean ci audit \
-        toolchains reference lean idris fstar ats negative fixtures selftest format
+define with_tool
+@tool=$$($(DETECT) --path $(1)); \
+if [ -z "$$tool" ]; then echo "[$(2)] SKIP ($(1) missing)"; else $(3); fi
+endef
+
+.PHONY: toolchains fixtures bootstrap reference lean idris fstar ats build verify audit negative simulate \
+        selftest crosscheck satcheck experiments benchmark test format ci clean
 
 toolchains:
 	@$(DETECT)
@@ -14,84 +18,64 @@ fixtures:
 	@$(PY) tools/gen_fixtures.py
 
 bootstrap: toolchains fixtures
-	@echo "bootstrap complete."
 
 reference:
-	@if [ ! -f reference/icarus_ref.py ]; then echo "[ref]   SKIP (not implemented)"; \
-	else $(PY) reference/icarus_ref.py --selfcheck; fi
+	@$(PY) reference/icarus_ref.py --selfcheck
 
 lean:
-	@LAKE=$$($(DETECT) --path lake); \
-	if [ -z "$$LAKE" ]; then echo "[lean]  SKIP (toolchain missing)"; \
-	elif [ ! -f lean/lakefile.toml ]; then echo "[lean]  SKIP (not implemented)"; \
-	else echo "[lean]  building"; cd lean && "$$LAKE" build; fi
+	$(call with_tool,lake,lean,cd lean && "$$tool" build)
 
 idris:
-	@IDRIS=$$($(DETECT) --path idris2); \
-	if [ -z "$$IDRIS" ]; then echo "[idris] SKIP (toolchain missing)"; \
-	elif [ ! -f idris/icarus.ipkg ]; then echo "[idris] SKIP (not implemented)"; \
-	else echo "[idris] building"; cd idris && "$$IDRIS" --build icarus.ipkg; fi
+	$(call with_tool,idris2,idris,cd idris && "$$tool" --build icarus.ipkg)
 
 fstar:
-	@FSTAR=$$($(DETECT) --path fstar); \
-	if [ -z "$$FSTAR" ]; then echo "[fstar] SKIP (toolchain missing)"; \
-	elif [ ! -f fstar/Makefile ]; then echo "[fstar] SKIP (not implemented)"; \
-	else echo "[fstar] verifying"; $(MAKE) -C fstar FSTAR="$$FSTAR"; fi
+	$(call with_tool,fstar,fstar,$(MAKE) -C fstar FSTAR="$$tool")
 
 ats:
-	@PATSCC=$$($(DETECT) --path patscc); \
-	if [ -z "$$PATSCC" ]; then echo "[ats]   SKIP (toolchain missing)"; \
-	elif [ ! -f ats/Makefile ]; then echo "[ats]   SKIP (not implemented)"; \
-	else echo "[ats]   building"; $(MAKE) -C ats; fi
+	$(call with_tool,patscc,ats,$(MAKE) -C ats PATSCC="$$tool")
 
 build: reference lean idris fstar ats
 
 verify: lean fstar idris negative audit
-	@echo "verify: provers + type-checkers + negative tests complete."
 
 audit:
 	@bash tools/audit-holes.sh
 
 negative:
-	@if [ -f negative/run.sh ]; then bash negative/run.sh; else echo "[neg]   SKIP (not implemented)"; fi
+	@bash negative/run.sh
 
 simulate:
-	@if [ -f ats/Makefile ] && [ -n "$$($(DETECT) --path patscc)" ]; then $(MAKE) -C ats simulate; \
-	else echo "[sim] running python reference"; $(PY) reference/icarus_ref.py --fixture fixtures/final_experiment.json --trace; fi
+	$(call with_tool,patscc,ats,$(MAKE) -C ats simulate PATSCC="$$tool")
 
 selftest:
-	@set -o pipefail; if [ -x idris/build/exec/icarus ]; then idris/build/exec/icarus --selftest | tail -1; else echo "[idris] SKIP selftest (not built)"; fi
-	@set -o pipefail; if [ -x ats/build/icarus_selftest ]; then ats/build/icarus_selftest | tail -1; else echo "[ats]   SKIP selftest (not built)"; fi
+	@if [ -x idris/build/exec/icarus ]; then idris/build/exec/icarus --selftest | tail -1; else echo "[idris] SKIP selftest (not built)"; fi
+	@if [ -x ats/build/icarus_selftest ]; then ats/build/icarus_selftest | tail -1; else echo "[ats] SKIP selftest (not built)"; fi
 
 crosscheck:
 	@$(PY) tools/crosscheck.py $(STRICT)
 
 satcheck:
-	@$(PY) tools/satcheck.py
+	@$(PY) tools/satcheck.py $(STRICT)
 
 experiments:
 	@$(PY) tools/fixed_point_experiment.py
 
 benchmark:
-	@if [ -f tools/benchmark.py ]; then $(PY) tools/benchmark.py; else echo "[bench] SKIP (not implemented)"; fi
+	@$(PY) tools/benchmark.py
 
 test: reference selftest crosscheck satcheck
-	@echo "test complete."
 
-# Whitespace errors (trailing blanks, space-before-tab, blank line at EOF) in tracked files.
-# None of the four languages has a formatter stable enough to enforce.
 format:
-	@git diff --check $$(git hash-object -t tree /dev/null) HEAD && echo "format: clean"
+	@git diff --check $$(git hash-object -t tree /dev/null) HEAD
+	$(call with_tool,ruff,python,"$$tool" format --check --quiet reference tools && "$$tool" check --quiet reference tools)
+	@echo "format: clean"
 
-# Strict gate for CI: every toolchain must be present and every stage must pass.
 ci:
-	@$(DETECT) --require-all || { echo "CI: a required toolchain is missing"; exit 1; }
+	@$(DETECT) --require-all
 	@$(MAKE) format bootstrap
-	@git diff --exit-code --stat fixtures/ || { echo "CI: regenerated fixtures differ from the committed ones"; exit 1; }
+	@git diff --exit-code --stat fixtures/
 	@$(MAKE) build verify test simulate STRICT=--strict
 
 clean:
-	@rm -rf dist lean/.lake lean/build idris/build fstar/out fstar/.cache ats/build fstar/driver/*.cm[iox] fstar/driver/*.o
-	@find . -name '*.checked' -delete 2>/dev/null; true
-	@find . -name '*_dats.c' -o -name '*_sats.c' | xargs rm -f 2>/dev/null; true
-	@echo "clean complete."
+	@rm -rf dist lean/.lake idris/build fstar/out ats/build
+	@find . \( -name '*.checked' -o -name '*_dats.c' -o -name '*_sats.c' \) -not -path './.git/*' -delete
