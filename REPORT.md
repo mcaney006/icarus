@@ -128,7 +128,7 @@ Where the types were weaker than intended:
 ## 5. Proof strategy
 
 - **Lean without Mathlib, over ℤ.** Real analysis would have needed Mathlib.
-  Integers keep the build to 7 s and every proof inside core Lean (`decide`,
+  Integers keep the build to 6 s and every proof inside core Lean (`decide`,
   `omega`, `simp`, structural induction). The cost is stated in §12: nothing
   about doubles or reals follows. `Mat.sumFin` is a structural finite sum,
   written so that linearity, swap, identity and associativity proofs go
@@ -172,7 +172,7 @@ Where the types were weaker than intended:
   960,000 frames and every microbenchmark loop: 0 allocator calls.
 - **Trusted.** The pool kernel uses `$UN` casts behind the linear signature.
   The counting allocator is C (A2).
-- **Contrast.** The Idris simulator allocates about 10.8 kB per frame (Chez
+- **Contrast.** The Idris simulator allocates about 11 kB per frame (Chez
   collector), because `Vect` results are fresh values. Nobody tried to make it
   allocate less. This is the shape of the domain model, not a benchmark
   verdict.
@@ -281,8 +281,8 @@ then the 1e-6 tolerance would be the contract.
 
 **Proof inventory.** All figures are in PROOFS.md:
 
-- 72 Lean theorems
-- 59 F\* lemmas and checked facts, plus the refinement types on every
+- 74 Lean theorems
+- 57 F\* lemmas and checked facts, plus the refinement types on every
   verified definition
 - 24 negative programs
 - 3 allow-listed trusted constructs
@@ -320,9 +320,10 @@ a theorem, refinement or constructor.
 
 **Benchmark** (docs/results/benchmark.md):
 
-- ATS: about 106 ns per frame, with 0 allocations.
-- Idris: about 1.3 µs per frame, with about 10.8 kB allocated per frame.
-- Clean check and build, per language, takes 2 to 9 s.
+- ATS: about 70 ns per frame, with 0 allocations. Removing the runtime index
+  clamps from the frame loop took it down from about 106 ns.
+- Idris: about 1.1 µs per frame, with about 11 kB allocated per frame.
+- Clean check and build, per language, takes 2 to 8 s.
 
 These numbers come from loops written to match each other, not to be fast. The
 F\* and Lean executables run only the decision layer, and the allocation units

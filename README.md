@@ -39,7 +39,7 @@ The loop also includes:
 ## Status
 
 - `make ci` passes locally.
-- 72 Lean theorems and 59 F\* lemmas and checked facts.
+- 74 Lean theorems and 57 F\* lemmas and checked facts.
 - 24 negative programs, all rejected.
 - 0 unlisted proof holes.
 - ATS, Idris, F\* and Lean match the oracle on 13 fixtures plus corruption

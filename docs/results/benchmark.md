@@ -17,39 +17,39 @@ of the simulator on `final_experiment`.
 
 | Lang | Operation | ns/op (median) | ns/op range | ops/s | alloc/op | alloc unit |
 |---|---|---:|---:|---:|---:|---|
-| ats | vadd4 | 3.1 | 2.8–4.4 | 3.25e+08 | 0 | allocator calls |
-| ats | dot4 | 1.6 | 1.6–1.7 | 6.17e+08 | 0 | allocator calls |
-| ats | matvec4x4 | 8.0 | 8.0–8.4 | 1.24e+08 | 0 | allocator calls |
-| ats | matmul4x4 | 26.6 | 25.9–26.8 | 3.76e+07 | 0 | allocator calls |
-| ats | ring_push_peek | 2.8 | 2.8–2.9 | 3.55e+08 | 0 | allocator calls |
-| ats | mode_decide | 1.9 | 1.9–2.0 | 5.13e+08 | 0 | allocator calls |
-| ats | frame | 106.0 | 104.9–110.5 | 9.43e+06 | 0 | allocator calls |
-| idris | vadd4 | 13.9 | 13.6–17.2 | 7.2e+07 | 192 | bytes (Chez sstats) |
-| idris | dot4 | 28.0 | 25.7–36.7 | 3.57e+07 | 352 | bytes (Chez sstats) |
-| idris | matvec4x4 | 114.0 | 110.2–135.1 | 8.77e+06 | 1.44e+03 | bytes (Chez sstats) |
-| idris | matmul4x4 | 523.7 | 508.9–759.2 | 1.91e+06 | 6.69e+03 | bytes (Chez sstats) |
-| idris | ring_push_peek | 63.2 | 60.7–71.6 | 1.58e+07 | 304 | bytes (Chez sstats) |
-| idris | mode_decide | 17.3 | 16.8–21.6 | 5.79e+07 | 16 | bytes (Chez sstats) |
-| idris | frame | 1338.8 | 1271.6–1583.1 | 7.47e+05 | 1.08e+04 | bytes (Chez sstats) |
+| ats | vadd4 | 3.1 | 2.9–5.8 | 3.24e+08 | 0 | allocator calls |
+| ats | dot4 | 1.6 | 1.5–1.8 | 6.12e+08 | 0 | allocator calls |
+| ats | matvec4x4 | 8.2 | 7.7–8.5 | 1.22e+08 | 0 | allocator calls |
+| ats | matmul4x4 | 26.9 | 26.5–28.6 | 3.72e+07 | 0 | allocator calls |
+| ats | ring_push_peek | 2.9 | 2.8–2.9 | 3.5e+08 | 0 | allocator calls |
+| ats | mode_decide | 1.8 | 1.8–1.9 | 5.48e+08 | 0 | allocator calls |
+| ats | frame | 70.4 | 69.8–72.1 | 1.42e+07 | 0 | allocator calls |
+| idris | vadd4 | 13.2 | 12.7–15.5 | 7.59e+07 | 192 | bytes (Chez sstats) |
+| idris | dot4 | 26.4 | 24.9–38.0 | 3.79e+07 | 352 | bytes (Chez sstats) |
+| idris | matvec4x4 | 279.3 | 266.6–344.6 | 3.58e+06 | 2.46e+03 | bytes (Chez sstats) |
+| idris | matmul4x4 | 827.9 | 796.7–1009.6 | 1.21e+06 | 1.02e+04 | bytes (Chez sstats) |
+| idris | ring_push_peek | 61.0 | 60.7–140.6 | 1.64e+07 | 304 | bytes (Chez sstats) |
+| idris | mode_decide | 25.4 | 24.2–40.7 | 3.93e+07 | 32 | bytes (Chez sstats) |
+| idris | frame | 1104.1 | 1035.2–1584.0 | 9.06e+05 | 1.11e+04 | bytes (Chez sstats) |
 
 ## End-to-end process runs on `final_experiment.icf` (48 frames)
 
 | Impl | Scope | median ms | min–max ms |
 |---|---|---:|---:|
-| reference | full simulation (Python oracle) | 90.9 | 85.4–97.2 |
-| ats | full simulation | 3.5 | 2.9–63.7 |
-| idris | full simulation | 89.9 | 52.7–416.3 |
-| fstar | decision layer only | 7.2 | 6.1–110.5 |
-| lean | decision layer only | 4.6 | 3.9–155.6 |
+| reference | full simulation (Python oracle) | 53.7 | 49.4–120.1 |
+| ats | full simulation | 4.2 | 2.8–60.6 |
+| idris | full simulation | 62.2 | 38.8–235.3 |
+| fstar | decision layer only | 4.9 | 4.0–132.2 |
+| lean | decision layer only | 4.4 | 3.8–103.6 |
 
 ## Binary size
 
 | Impl | Artifact | bytes |
 |---|---|---:|
-| ats | `ats/build/icarus_sim` | 58312 |
-| idris | `idris/build/exec/icarus_app` | 292168 |
-| fstar | `fstar/out/icarus_decide` | 3791120 |
-| lean | `lean/.lake/build/bin/icarus` | 2469904 |
+| ats | `ats/build/icarus_sim` | 58552 |
+| idris | `idris/build/exec/icarus_app` | 289568 |
+| fstar | `fstar/out/icarus_decide` | 3791808 |
+| lean | `lean/.lake/build/bin/icarus` | 2471072 |
 
 The Idris figure is the compiled Scheme program only. It needs a Chez Scheme
 installation at run time, and that is not counted. The other three artifacts are
@@ -59,11 +59,11 @@ native executables with their runtimes linked in.
 
 | Lang | Stage | seconds |
 |---|---|---:|
-| lean | check+build (lake build: elaboration and kernel checking of every proof, plus the executable) | 6.7 |
-| idris | check+build (type checking and Chez Scheme code generation) | 1.9 |
-| fstar | check (verify all modules with Z3) | 3.9 |
-| fstar | build (OCaml extraction, compilation and linking) | 4.9 |
-| ats | check (patscc -tcats on every .dats: linear and dependent type checking) | 1.6 |
+| lean | check+build (lake build: elaboration and kernel checking of every proof, plus the executable) | 5.7 |
+| idris | check+build (type checking and Chez Scheme code generation) | 1.5 |
+| fstar | check (verify all modules with Z3) | 4.4 |
+| fstar | build (OCaml extraction, compilation and linking) | 3.8 |
+| ats | check (patscc -tcats on every .dats: linear and dependent type checking) | 1.7 |
 | ats | check+build (patsopt to C, clang -O2, link; three executables) | 5.1 |
 
 The stages are not equivalent across languages. Lean and Idris check and

@@ -3,39 +3,39 @@
     "os": "Darwin 27.2.0",
     "machine": "arm64",
     "cpu": "Apple M5",
-    "python": "3.9.6"
+    "python": "3.14.7"
   },
   "repeats": 5,
   "rebuild": [
     {
       "lang": "lean",
       "stage": "check+build (lake build: elaboration and kernel checking of every proof, plus the executable)",
-      "seconds": 6.660246666
+      "seconds": 5.748143500008155
     },
     {
       "lang": "idris",
       "stage": "check+build (type checking and Chez Scheme code generation)",
-      "seconds": 1.8815224169999993
+      "seconds": 1.4597955000353977
     },
     {
       "lang": "fstar",
       "stage": "check (verify all modules with Z3)",
-      "seconds": 3.8801172919999996
+      "seconds": 4.399885584018193
     },
     {
       "lang": "fstar",
       "stage": "build (OCaml extraction, compilation and linking)",
-      "seconds": 4.86546575
+      "seconds": 3.8365027910331264
     },
     {
       "lang": "ats",
       "stage": "check (patscc -tcats on every .dats: linear and dependent type checking)",
-      "seconds": 1.615366292000001
+      "seconds": 1.7080008329940028
     },
     {
       "lang": "ats",
       "stage": "check+build (patsopt to C, clang -O2, link; three executables)",
-      "seconds": 5.127214374999998
+      "seconds": 5.077111040998716
     }
   ],
   "micro": [
@@ -44,10 +44,10 @@
       "op": "vadd4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 3.0802,
-      "ops_per_sec": 324654243.23095906,
-      "ns_min": 2.7862,
-      "ns_max": 4.359,
+      "ns_per_op": 3.0891,
+      "ops_per_sec": 323718882.52241755,
+      "ns_min": 2.9483,
+      "ns_max": 5.7794,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -56,10 +56,10 @@
       "op": "dot4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 1.6201,
-      "ops_per_sec": 617245849.0216653,
-      "ns_min": 1.5991,
-      "ns_max": 1.6756,
+      "ns_per_op": 1.6333,
+      "ops_per_sec": 612257393.0080205,
+      "ns_min": 1.5205,
+      "ns_max": 1.7825,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -68,10 +68,10 @@
       "op": "matvec4x4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 8.0478,
-      "ops_per_sec": 124257561.07259127,
-      "ns_min": 7.9559,
-      "ns_max": 8.3561,
+      "ns_per_op": 8.2211,
+      "ops_per_sec": 121638223.5953826,
+      "ns_min": 7.7461,
+      "ns_max": 8.4731,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -80,10 +80,10 @@
       "op": "matmul4x4",
       "iterations": 1000000,
       "runs": 5,
-      "ns_per_op": 26.6,
-      "ops_per_sec": 37593984.96240602,
-      "ns_min": 25.857,
-      "ns_max": 26.796,
+      "ns_per_op": 26.85,
+      "ops_per_sec": 37243947.858473,
+      "ns_min": 26.479,
+      "ns_max": 28.582,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -92,10 +92,10 @@
       "op": "ring_push_peek",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 2.8163,
-      "ops_per_sec": 355075808.68515426,
-      "ns_min": 2.8141,
-      "ns_max": 2.8639,
+      "ns_per_op": 2.8566,
+      "ops_per_sec": 350066512.6374011,
+      "ns_min": 2.8168,
+      "ns_max": 2.9049,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -104,10 +104,10 @@
       "op": "mode_decide",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 1.9499,
-      "ops_per_sec": 512846812.6570594,
-      "ns_min": 1.9202,
-      "ns_max": 1.9779,
+      "ns_per_op": 1.824,
+      "ops_per_sec": 548245614.0350877,
+      "ns_min": 1.8032,
+      "ns_max": 1.876,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -116,10 +116,10 @@
       "op": "frame",
       "iterations": 960000,
       "runs": 5,
-      "ns_per_op": 106.040625,
-      "ops_per_sec": 9430348.038782306,
-      "ns_min": 104.91875,
-      "ns_max": 110.46354166666667,
+      "ns_per_op": 70.38229166666666,
+      "ops_per_sec": 14208119.348202525,
+      "ns_min": 69.7625,
+      "ns_max": 72.13125,
       "alloc_per_op": 0.0,
       "alloc_unit": "allocator calls"
     },
@@ -128,11 +128,11 @@
       "op": "vadd4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 13.8975,
-      "ops_per_sec": 71955387.65965103,
-      "ns_min": 13.6476,
-      "ns_max": 17.237,
-      "alloc_per_op": 192.0157904,
+      "ns_per_op": 13.1817,
+      "ops_per_sec": 75862749.11430241,
+      "ns_min": 12.6889,
+      "ns_max": 15.5279,
+      "alloc_per_op": 192.0157936,
       "alloc_unit": "bytes (Chez sstats)"
     },
     {
@@ -140,11 +140,11 @@
       "op": "dot4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 27.9813,
-      "ops_per_sec": 35738153.695503786,
-      "ns_min": 25.676,
-      "ns_max": 36.7166,
-      "alloc_per_op": 352.0289312,
+      "ns_per_op": 26.4014,
+      "ops_per_sec": 37876779.261705816,
+      "ns_min": 24.9487,
+      "ns_max": 37.9714,
+      "alloc_per_op": 352.0289344,
       "alloc_unit": "bytes (Chez sstats)"
     },
     {
@@ -152,11 +152,11 @@
       "op": "matvec4x4",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 114.02,
-      "ops_per_sec": 8770391.15944571,
-      "ns_min": 110.1681,
-      "ns_max": 135.1293,
-      "alloc_per_op": 1440.1184048,
+      "ns_per_op": 279.3088,
+      "ops_per_sec": 3580266.7155492418,
+      "ns_min": 266.6387,
+      "ns_max": 344.5902,
+      "alloc_per_op": 2464.2021712,
       "alloc_unit": "bytes (Chez sstats)"
     },
     {
@@ -164,11 +164,11 @@
       "op": "matmul4x4",
       "iterations": 1000000,
       "runs": 5,
-      "ns_per_op": 523.707,
-      "ops_per_sec": 1909464.6433979303,
-      "ns_min": 508.924,
-      "ns_max": 759.227,
-      "alloc_per_op": 6688.551488,
+      "ns_per_op": 827.922,
+      "ops_per_sec": 1207843.2509342667,
+      "ns_min": 796.689,
+      "ns_max": 1009.632,
+      "alloc_per_op": 10208.838752,
       "alloc_unit": "bytes (Chez sstats)"
     },
     {
@@ -176,10 +176,10 @@
       "op": "ring_push_peek",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 63.2254,
-      "ops_per_sec": 15816428.207650723,
-      "ns_min": 60.6505,
-      "ns_max": 71.5578,
+      "ns_per_op": 61.0463,
+      "ops_per_sec": 16381009.168450832,
+      "ns_min": 60.6915,
+      "ns_max": 140.5828,
       "alloc_per_op": 304.0269904,
       "alloc_unit": "bytes (Chez sstats)"
     },
@@ -188,11 +188,11 @@
       "op": "mode_decide",
       "iterations": 10000000,
       "runs": 5,
-      "ns_per_op": 17.2821,
-      "ops_per_sec": 57863338.36744377,
-      "ns_min": 16.8106,
-      "ns_max": 21.5815,
-      "alloc_per_op": 16.0014304,
+      "ns_per_op": 25.4241,
+      "ops_per_sec": 39332759.07505084,
+      "ns_min": 24.1734,
+      "ns_max": 40.7131,
+      "alloc_per_op": 32.0028288,
       "alloc_unit": "bytes (Chez sstats)"
     },
     {
@@ -200,11 +200,11 @@
       "op": "frame",
       "iterations": 96000,
       "runs": 5,
-      "ns_per_op": 1338.7916666666667,
-      "ops_per_sec": 746942.2053468613,
-      "ns_min": 1271.5625,
-      "ns_max": 1583.1041666666667,
-      "alloc_per_op": 10800.9465,
+      "ns_per_op": 1104.0729166666667,
+      "ops_per_sec": 905737.2795803418,
+      "ns_min": 1035.2291666666667,
+      "ns_max": 1584.0208333333333,
+      "alloc_per_op": 11118.6445,
       "alloc_unit": "bytes (Chez sstats)"
     }
   ],
@@ -213,63 +213,63 @@
       "impl": "reference",
       "scope": "full simulation (Python oracle)",
       "runs": 10,
-      "median_ms": 90.948228999995,
-      "min_ms": 85.40716699999962,
-      "max_ms": 97.23479200000185
+      "median_ms": 53.697770985309035,
+      "min_ms": 49.4005840155296,
+      "max_ms": 120.12974999379367
     },
     {
       "impl": "ats",
       "scope": "full simulation",
       "runs": 10,
-      "median_ms": 3.4658334999981832,
-      "min_ms": 2.8508750000000305,
-      "max_ms": 63.66308300000156
+      "median_ms": 4.207104007946327,
+      "min_ms": 2.7713330346159637,
+      "max_ms": 60.5902909883298
     },
     {
       "impl": "idris",
       "scope": "full simulation",
       "runs": 10,
-      "median_ms": 89.89575000000372,
-      "min_ms": 52.650833999997815,
-      "max_ms": 416.30566699999605
+      "median_ms": 62.2266665159259,
+      "min_ms": 38.82233297917992,
+      "max_ms": 235.2803330286406
     },
     {
       "impl": "fstar",
       "scope": "decision layer only",
       "runs": 10,
-      "median_ms": 7.211291500002659,
-      "min_ms": 6.123541000000898,
-      "max_ms": 110.46366599999402
+      "median_ms": 4.919666505884379,
+      "min_ms": 4.01654199231416,
+      "max_ms": 132.2480840026401
     },
     {
       "impl": "lean",
       "scope": "decision layer only",
       "runs": 10,
-      "median_ms": 4.627479500001641,
-      "min_ms": 3.93125000000083,
-      "max_ms": 155.59133299999672
+      "median_ms": 4.41354198846966,
+      "min_ms": 3.8009999552741647,
+      "max_ms": 103.57383301015943
     }
   ],
   "sizes": [
     {
       "impl": "ats",
       "path": "ats/build/icarus_sim",
-      "bytes": 58312
+      "bytes": 58552
     },
     {
       "impl": "idris",
       "path": "idris/build/exec/icarus_app",
-      "bytes": 292168
+      "bytes": 289568
     },
     {
       "impl": "fstar",
       "path": "fstar/out/icarus_decide",
-      "bytes": 3791120
+      "bytes": 3791808
     },
     {
       "impl": "lean",
       "path": "lean/.lake/build/bin/icarus",
-      "bytes": 2469904
+      "bytes": 2471072
     }
   ]
 }
