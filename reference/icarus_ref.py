@@ -1,361 +1,650 @@
 #!/usr/bin/env python3
-"""Executable oracle for the icarus abstract control system.
-
-This module is the authoritative behavioural specification. The Lean/Idris/F*/ATS
-implementations are checked for *observable* agreement with the trace this module
-produces on a shared fixture. It deliberately uses plain Python lists and explicit
-index-ordered arithmetic (no numpy, no FMA) so the four typed languages can mirror
-its operation order exactly; cross-language agreement is then defined up to the
-fixture tolerance rather than bit-identity.
-
-Nothing here is physical. State components are dimensionless; the matrices are
-synthetic constants from tools/gen_fixtures.py.
-"""
 from __future__ import annotations
-import argparse, random, json, math, sys
-from dataclasses import dataclass, field
-from enum import Enum
 
-# ----- discrete mode machine (mirrored in every implementation) ----------------
-class Mode(str, Enum):
-    Boot="Boot"; SelfTest="SelfTest"; Calibrating="Calibrating"; Ready="Ready"
-    Running="Running"; Degraded="Degraded"; Safe="Safe"; Fault="Fault"
+import argparse
+import json
+import math
+import random
+import sys
+from collections import defaultdict
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass, replace
+from enum import IntEnum, IntFlag
+from itertools import pairwise
+from pathlib import Path
+from typing import Protocol, TypeVar
 
-# Legal transitions. The reference never performs a transition outside this set;
-# tools/crosscheck and the self-check assert that the emitted sequence respects it.
-LEGAL = {
-    Mode.Boot:       {Mode.SelfTest, Mode.Fault, Mode.Boot},
-    Mode.SelfTest:   {Mode.Calibrating, Mode.Fault, Mode.SelfTest},
-    Mode.Calibrating:{Mode.Ready, Mode.Fault, Mode.Calibrating},
-    Mode.Ready:      {Mode.Running, Mode.Safe, Mode.Ready},
-    Mode.Running:    {Mode.Running, Mode.Degraded, Mode.Safe},
-    Mode.Degraded:   {Mode.Degraded, Mode.Running, Mode.Safe},
-    Mode.Safe:       {Mode.Safe},
-    Mode.Fault:      {Mode.Fault},
+Vector = list[float]
+Matrix = list[list[float]]
+Word = TypeVar("Word", float, int)
+
+ROOT = Path(__file__).resolve().parents[1]
+PLANT_PATH = ROOT / "fixtures" / "plant.json"
+
+MEAS_LIMIT = 50.0
+INNOV_THRESH = 10.0
+STATE_BOUND = 1.0e3
+CTRL_LIMIT = 1.0
+DEGRADED_CTRL = 0.5
+RECOVERY_FRAMES = 3
+DEGRADED_LIMIT = 3
+STUCK_VALUE = 7.0
+EXCEEDANCE_TOLERANCE = 1e-12
+CHANNELS = 3
+FRAME_BUDGET = 1000
+STAGE_BUDGET = {
+    "Acquire": 120,
+    "Normalize": 80,
+    "Estimate": 220,
+    "Decide": 180,
+    "Control": 160,
+    "Validate": 90,
+    "Record": 50,
+}
+NOMINAL_FRAME_COST = sum(STAGE_BUDGET.values())
+CANONICAL_SCALE = 10**9
+U64 = (1 << 64) - 1
+FNV_OFFSET = 0x811C9DC5
+FNV_PRIME = 0x01000193
+U32 = (1 << 32) - 1
+
+
+class FixtureError(ValueError):
+    pass
+
+
+class Mode(IntEnum):
+    Boot = 0
+    SelfTest = 1
+    Calibrating = 2
+    Ready = 3
+    Running = 4
+    Degraded = 5
+    Safe = 6
+    Fault = 7
+
+
+LEGAL: dict[Mode, frozenset[Mode]] = {
+    Mode.Boot: frozenset({Mode.Boot, Mode.SelfTest, Mode.Fault}),
+    Mode.SelfTest: frozenset({Mode.SelfTest, Mode.Calibrating, Mode.Fault}),
+    Mode.Calibrating: frozenset({Mode.Calibrating, Mode.Ready, Mode.Fault}),
+    Mode.Ready: frozenset({Mode.Ready, Mode.Running, Mode.Safe}),
+    Mode.Running: frozenset({Mode.Running, Mode.Degraded, Mode.Safe}),
+    Mode.Degraded: frozenset({Mode.Degraded, Mode.Running, Mode.Safe}),
+    Mode.Safe: frozenset({Mode.Safe}),
+    Mode.Fault: frozenset({Mode.Fault}),
 }
 
-class Health(str, Enum):
-    Healthy="Healthy"; Suspect="Suspect"; Degraded="Degraded"; Unsafe="Unsafe"
 
-class Fault(str, Enum):
-    MeasurementDropout="MeasurementDropout"
-    StaleMeasurement="StaleMeasurement"
-    BiasedMeasurement="BiasedMeasurement"
-    StuckChannel="StuckChannel"
-    OutOfRange="OutOfRange"
-    TimingOverrun="TimingOverrun"
-    NumericSaturation="NumericSaturation"
-    CorruptFixture="CorruptFixture"
-    EstimatorDisagreement="EstimatorDisagreement"
-    ControlSaturation="ControlSaturation"
+class Health(IntEnum):
+    Healthy = 0
+    Suspect = 1
+    Degraded = 2
+    Unsafe = 3
 
-# ----- artificial constants (documented in ASSUMPTIONS.md) ----------------------
-MEAS_LIMIT   = 50.0    # normalization clamp on each measurement component
-INNOV_THRESH = 10.0    # ||y - C xhat|| above this flags estimator disagreement
-STATE_BOUND  = 1.0e3   # |state component| above this (or non-finite) is Unsafe
-CTRL_LIMIT   = 1.0     # abstract actuator interval is [-CTRL_LIMIT, CTRL_LIMIT]
-DEGRADED_CTRL= 0.5     # reduced authority while Degraded
-RECOVERY_FRAMES = 3    # consecutive Healthy frames needed Degraded -> Running
-DEGRADED_LIMIT  = 3    # non-Healthy frames in one Degraded episode forcing Degraded -> Safe
-STUCK_VALUE  = 7.0     # value a stuck synthetic channel reports
 
-FRAME_BUDGET = 1000
-STAGE_BUDGET = {"Acquire":120,"Normalize":80,"Estimate":220,"Decide":180,
-                "Control":160,"Validate":90,"Record":50}
+class Flag(IntFlag):
+    MEAS = 1
+    ESTIMATOR = 2
+    TIMING = 4
+    CTRL_SAT = 8
+    NUMERIC = 16
 
-# ----- small fixed-dimension linear algebra (index-ordered) ---------------------
-def matvec(M, v):
-    return [sum(M[i][j]*v[j] for j in range(len(v))) for i in range(len(M))]
-def vadd(a,b): return [a[i]+b[i] for i in range(len(a))]
-def vsub(a,b): return [a[i]-b[i] for i in range(len(a))]
-def vneg(a):   return [-x for x in a]
-def vnorm2(a): return math.sqrt(sum(x*x for x in a))
-def sat(v, lim): return [max(-lim, min(lim, x)) for x in v]
-def median3(a,b,c):
-    """Selects one of its arguments; never computes a new float. If two agree the
-    result is exactly that value, so one divergent channel cannot move it."""
-    return max(min(a,b), min(max(a,b),c))
+    @property
+    def labels(self) -> list[str]:
+        return sorted(member.name.lower() for member in self)
 
-# ----- plant + fixture ----------------------------------------------------------
-@dataclass
+
+class Fault(IntEnum):
+    MeasurementDropout = 0
+    StaleMeasurement = 1
+    BiasedMeasurement = 2
+    StuckChannel = 3
+    OutOfRange = 4
+    TimingOverrun = 5
+    NumericSaturation = 6
+    CorruptFixture = 7
+    EstimatorDisagreement = 8
+    ControlSaturation = 9
+
+
+@dataclass(frozen=True, slots=True)
+class FaultEvent:
+    step: int
+    kind: Fault
+    channel: int = 0
+    amount: float = 20.0
+    value: float = 1.0e6
+    overrun: int = 250
+
+    @classmethod
+    def parse(cls, record: dict) -> FaultEvent:
+        try:
+            return cls(**{**record, "kind": Fault[record["kind"]]})
+        except (KeyError, TypeError) as error:
+            raise FixtureError(f"malformed fault {record!r}: {error}") from None
+
+    @property
+    def parameter(self) -> float:
+        match self.kind:
+            case Fault.BiasedMeasurement:
+                return self.amount
+            case Fault.OutOfRange:
+                return self.value
+            case Fault.TimingOverrun:
+                return float(self.overrun)
+            case _:
+                return 0.0
+
+
+def matvec(m: Matrix, v: Sequence[float]) -> Vector:
+    return [sum(a * b for a, b in zip(row, v, strict=True)) for row in m]
+
+
+def vadd(a: Sequence[float], b: Sequence[float]) -> Vector:
+    return [x + y for x, y in zip(a, b, strict=True)]
+
+
+def vsub(a: Sequence[float], b: Sequence[float]) -> Vector:
+    return [x - y for x, y in zip(a, b, strict=True)]
+
+
+def vneg(a: Sequence[float]) -> Vector:
+    return [-x for x in a]
+
+
+def norm2(a: Sequence[float]) -> float:
+    return math.sqrt(sum(x * x for x in a))
+
+
+def clamp(v: Sequence[float], limit: float) -> Vector:
+    return [max(-limit, min(limit, x)) for x in v]
+
+
+def exceeds(v: Sequence[float], limit: float) -> bool:
+    return any(abs(x) > limit + EXCEEDANCE_TOLERANCE for x in v)
+
+
+def median3(a: float, b: float, c: float) -> float:
+    return max(min(a, b), min(max(a, b), c))
+
+
+def fnv1a(data: bytes) -> int:
+    digest = FNV_OFFSET
+    for byte in data:
+        digest = ((digest ^ byte) * FNV_PRIME) & U32
+    return digest
+
+
+def seal(lines: Iterable[str]) -> str:
+    body = "".join(f"{line}\n" for line in lines)
+    return f"{body}Z {fnv1a(body.encode())}\n"
+
+
+def lcg(seed: int) -> Iterator[int]:
+    state = seed & U64
+    while True:
+        state = (state * 6364136223846793005 + 1442695040888963407) & U64
+        yield state
+
+
+def finite_json(text: str) -> dict:
+    def reject(constant: str) -> float:
+        raise FixtureError(f"non-finite number {constant} in JSON")
+
+    return json.loads(text, parse_constant=reject)
+
+
+def shaped(matrix: Matrix, rows: int, columns: int, name: str) -> Matrix:
+    if len(matrix) != rows or any(len(row) != columns for row in matrix):
+        raise FixtureError(f"{name} must be {rows}x{columns}")
+    if not all(math.isfinite(entry) for row in matrix for entry in row):
+        raise FixtureError(f"{name} has a non-finite entry")
+    return matrix
+
+
+@dataclass(frozen=True, slots=True)
 class Plant:
-    n:int; m:int; p:int
-    A:list; B:list; C:list; K:list; L:list
-    ctrl_limit:float = CTRL_LIMIT
+    A: Matrix
+    B: Matrix
+    C: Matrix
+    K: Matrix
+    L: Matrix
+    control_limit: float = CTRL_LIMIT
 
-def load_plant(path)->Plant:
-    d=json.load(open(path))
-    dm=d["dims"]
-    return Plant(dm["n"],dm["m"],dm["p"],d["A"],d["B"],d["C"],d["K"],d["L"],
-                 d.get("control_limit",CTRL_LIMIT))
+    def __post_init__(self) -> None:
+        n, m, p = len(self.A), len(self.B[0]) if self.B else 0, len(self.C)
+        if not (n and m and p):
+            raise FixtureError("plant dimensions must be positive")
+        for matrix, rows, columns, name in (
+            (self.A, n, n, "A"),
+            (self.B, n, m, "B"),
+            (self.C, p, n, "C"),
+            (self.K, m, n, "K"),
+            (self.L, n, p, "L"),
+        ):
+            shaped(matrix, rows, columns, name)
 
-@dataclass
-class FrameRecord:
-    k:int; mode:str; health:str; u:list; y:list; xhat:list; x:list
-    flags:list; frame_cost:int; deadline_miss:bool
+    @classmethod
+    def load(cls, path: Path | str = PLANT_PATH) -> Plant:
+        spec = finite_json(Path(path).read_text())
+        return cls(spec["A"], spec["B"], spec["C"], spec["K"], spec["L"], spec.get("control_limit", CTRL_LIMIT))
 
-def _active(faults, k):
-    return [f for f in faults if f.get("step")==k]
+    @property
+    def states(self) -> int:
+        return len(self.A)
 
-def saturated(raw, lim):
-    return any(abs(x)>lim+1e-12 for x in raw)
+    @property
+    def inputs(self) -> int:
+        return len(self.B[0])
 
-def run(plant:Plant, fixture:dict, arith=None):
-    """Run the deterministic frame loop. Returns (trace, summary)."""
-    A = arith if arith is not None else Float()
-    n,m,p = plant.n, plant.m, plant.p
-    Am,Bm,Cm,Km,Lm = (A.mat(M) for M in (plant.A,plant.B,plant.C,plant.K,plant.L))
-    steps = fixture["steps"]
-    x    = list(fixture["initial_state"])          # hidden true state
-    xhat = A.vec([0.0]*n)                           # estimator starts at origin
-    u_prev=A.vec([0.0]*m)
-    last_meas=[0.0]*p
-    mode=Mode.Ready
-    healthy_streak=0; degraded_bad=0
-    trace=[]; mode_seq=[mode.value]
+    @property
+    def outputs(self) -> int:
+        return len(self.C)
 
-    faults = fixture.get("faults",[])
-    for k in range(steps):
-        act=_active(faults,k)
-        kinds={f["kind"] for f in act}
-        flags=set()
 
-        # --- Acquire: three redundant channels, per-component median vote -------
-        v = fixture["noise"][k]
-        true_meas = matvec(plant.C, x)
-        base = vadd(true_meas, v)
-        ch = [list(base), list(base), list(base)]     # 3 identical healthy channels
-        for f in act:
-            c=f.get("channel",0)
-            if f["kind"]==Fault.BiasedMeasurement:   ch[0][c]+=f.get("amount",20.0); flags.add("meas")
-            elif f["kind"]==Fault.StuckChannel:      ch[0][c]=STUCK_VALUE; flags.add("meas")
-            elif f["kind"]==Fault.OutOfRange:        ch[0][c]=f.get("value",1.0e6); flags.add("meas")
-            elif f["kind"]==Fault.MeasurementDropout:
-                for t in range(3): ch[t][c]=last_meas[c]
-                flags.add("meas")
-        y=[median3(ch[0][i],ch[1][i],ch[2][i]) for i in range(p)]
-        if Fault.StaleMeasurement in kinds:
-            y=list(last_meas); flags.add("meas")
+@dataclass(frozen=True, slots=True)
+class Fixture:
+    steps: int
+    initial_state: Vector
+    disturbance: Matrix
+    noise: Matrix
+    faults: tuple[FaultEvent, ...]
 
-        # --- Normalize: clamp to sensor range ----------------------------------
-        y_pre=list(y)
-        y=sat(y, MEAS_LIMIT)
-        if any(abs(a) > MEAS_LIMIT+1e-12 for a in y_pre): flags.add("meas")
-        last_meas=list(y)
+    @classmethod
+    def parse(cls, record: dict, plant: Plant) -> Fixture:
+        try:
+            steps, initial = record["steps"], record["initial_state"]
+            disturbance, noise = record["disturbance"], record["noise"]
+        except KeyError as missing:
+            raise FixtureError(f"fixture lacks {missing}") from None
+        if not isinstance(steps, int) or steps < 0:
+            raise FixtureError(f"steps must be a non-negative integer, got {steps!r}")
+        shaped([initial], 1, plant.states, "initial_state")
+        shaped(disturbance, steps, plant.states, "disturbance")
+        shaped(noise, steps, plant.outputs, "noise")
+        faults = tuple(map(FaultEvent.parse, record.get("faults", [])))
+        for event in faults:
+            if not 0 <= event.step < steps:
+                raise FixtureError(f"fault at step {event.step} lies outside 0..{steps - 1}")
+            if not 0 <= event.channel < plant.outputs:
+                raise FixtureError(f"fault channel {event.channel} lies outside 0..{plant.outputs - 1}")
+        return cls(steps, initial, disturbance, noise, faults)
 
-        # --- Estimate: Luenberger observer; large innovation flags disagreement -
-        yq = A.vec(y)                                 # sensor sample as the controller sees it
-        innov = A.vsub(yq, A.matvec(Cm, xhat))
-        if vnorm2(A.tof(innov)) > INNOV_THRESH or Fault.EstimatorDisagreement in kinds:
-            flags.add("estimator")
-        xhat = A.vadd(A.vadd(A.matvec(Am,xhat), A.matvec(Bm,u_prev)),
-                      A.matvec(Lm, innov))
-        if Fault.NumericSaturation in kinds:
-            xhat = A.inject_overflow(xhat)
+    @classmethod
+    def load(cls, path: Path | str, plant: Plant) -> Fixture:
+        try:
+            return cls.parse(finite_json(Path(path).read_text()), plant)
+        except FixtureError as error:
+            raise FixtureError(f"{path}: {error}") from None
 
-        # --- timing / deadline --------------------------------------------------
-        frame_cost=sum(STAGE_BUDGET.values())
-        deadline_miss=False
-        if Fault.TimingOverrun in kinds:
-            frame_cost += next((f.get("overrun",250) for f in act
-                                if f["kind"]==Fault.TimingOverrun),250)
-            if frame_cost>FRAME_BUDGET: deadline_miss=True; flags.add("timing")
 
-        # --- Control (depends on mode) -----------------------------------------
-        if mode in (Mode.Running, Mode.Degraded):
-            raw=A.vneg(A.matvec(Km, xhat))
-            lim = plant.ctrl_limit if mode==Mode.Running else DEGRADED_CTRL
-            if saturated(A.tof(raw), lim) or Fault.ControlSaturation in kinds: flags.add("ctrl_sat")
-            u=A.clamp(raw, lim)
-        else:
-            u=A.vec([0.0]*m)
+class Arithmetic(Protocol[Word]):
+    def lift(self, v: Sequence[float]) -> list[Word]: ...
+    def lift_matrix(self, m: Matrix) -> list[list[Word]]: ...
+    def lower(self, v: Sequence[Word]) -> Vector: ...
+    def matvec(self, m: Sequence[Sequence[Word]], v: Sequence[Word]) -> list[Word]: ...
+    def add(self, a: Sequence[Word], b: Sequence[Word]) -> list[Word]: ...
+    def sub(self, a: Sequence[Word], b: Sequence[Word]) -> list[Word]: ...
+    def neg(self, a: Sequence[Word]) -> list[Word]: ...
+    def clamp(self, v: Sequence[Word], limit: float) -> list[Word]: ...
+    def overflow(self, v: Sequence[Word]) -> list[Word]: ...
+    def stats(self) -> dict[str, int]: ...
 
-        # --- Validate: numeric range -------------------------------------------
-        if any((not math.isfinite(a)) or abs(a)>STATE_BOUND for a in A.tof(xhat)) \
-           or Fault.NumericSaturation in kinds:
-            flags.add("numeric")
 
-        # --- Health monitor (deterministic) ------------------------------------
-        if "numeric" in flags:      health=Health.Unsafe
-        elif len(flags)>=2:         health=Health.Degraded
-        elif len(flags)==1:         health=Health.Suspect
-        else:                       health=Health.Healthy
+class FloatArithmetic:
+    @staticmethod
+    def lift(v: Sequence[float]) -> Vector:
+        return list(v)
 
-        # --- Decide: next mode --------------------------------------------------
-        # Recovery (consecutive Healthy frames) wins over the Safe fallback, which
-        # fires only on repeated *bad* frames inside one Degraded episode.
-        nxt=mode
-        if mode==Mode.Ready:
-            nxt=Mode.Running
-        elif mode==Mode.Running:
-            if health==Health.Unsafe: nxt=Mode.Safe
-            elif health==Health.Degraded or deadline_miss:
-                nxt=Mode.Degraded; degraded_bad=0
-        elif mode==Mode.Degraded:
-            if health==Health.Unsafe:
-                nxt=Mode.Safe
-            elif health==Health.Healthy:
-                nxt=Mode.Running if healthy_streak+1>=RECOVERY_FRAMES else Mode.Degraded
-            else:
-                degraded_bad+=1
-                nxt=Mode.Safe if degraded_bad>=DEGRADED_LIMIT else Mode.Degraded
-        assert nxt in LEGAL[mode], f"illegal transition {mode}->{nxt}"
+    @staticmethod
+    def lift_matrix(m: Matrix) -> Matrix:
+        return m
 
-        healthy_streak = healthy_streak+1 if health==Health.Healthy else 0
+    @staticmethod
+    def lower(v: Sequence[float]) -> Vector:
+        return list(v)
 
-        trace.append(FrameRecord(k,mode.value,health.value,list(A.tof(u)),list(y),
-                     list(A.tof(xhat)),list(x),sorted(flags),frame_cost,deadline_miss))
-        mode=nxt; mode_seq.append(mode.value)
+    @staticmethod
+    def matvec(m: Matrix, v: Sequence[float]) -> Vector:
+        return matvec(m, v)
 
-        # --- plant update (hidden world) ---------------------------------------
-        w=fixture["disturbance"][k]
-        x=vadd(vadd(matvec(plant.A,x), matvec(plant.B,A.tof(u))), w)
-        u_prev=list(u)
+    @staticmethod
+    def add(a: Sequence[float], b: Sequence[float]) -> Vector:
+        return vadd(a, b)
 
-    summary={"mode_sequence":mode_seq,
-             "final_state":x,"final_estimate":A.tof(xhat),"final_mode":mode.value,
-             "arith":A.stats()}
-    return trace, summary
+    @staticmethod
+    def sub(a: Sequence[float], b: Sequence[float]) -> Vector:
+        return vsub(a, b)
 
-# ----- arithmetic back-ends -----------------------------------------------------
-class Float:
-    """The reference arithmetic: plain IEEE doubles, left-to-right accumulation."""
-    def mat(self, M): return M
-    def vec(self, v): return list(v)
-    def tof(self, v): return v
-    def matvec(self, M, v): return matvec(M, v)
-    def vadd(self, a, b): return vadd(a, b)
-    def vsub(self, a, b): return vsub(a, b)
-    def vneg(self, a): return vneg(a)
-    def clamp(self, v, lim): return sat(v, lim)
-    def inject_overflow(self, v): return v
-    def stats(self): return {}
+    @staticmethod
+    def neg(a: Sequence[float]) -> Vector:
+        return vneg(a)
 
-class FixedArith:
-    """Saturating fixed-point words with SCALE raw units per 1.0 (artificial Q15.16).
+    @staticmethod
+    def clamp(v: Sequence[float], limit: float) -> Vector:
+        return clamp(v, limit)
 
-    Products are rescaled round-half-up and every accumulation saturates, matching
-    fstar/src/Icarus.Sat.fst operation for operation; `sat_events` counts every time a
-    result had to be clamped. The hidden plant stays in floating point: only the
-    controller side (sensor sample, estimator, control law) is quantised."""
+    @staticmethod
+    def overflow(v: Sequence[float]) -> Vector:
+        return list(v)
+
+    @staticmethod
+    def stats() -> dict[str, int]:
+        return {}
+
+
+class FixedArithmetic:
     SCALE = 65536
-    MIN_RAW = -2147483648
-    MAX_RAW = 2147483647
+    MIN_RAW = -(2**31)
+    MAX_RAW = 2**31 - 1
+    OVERFLOW_PROBE = 1.0e5
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.sat_events = 0
         self.ops = 0
 
-    def _clamp(self, r):
-        if r < self.MIN_RAW: self.sat_events += 1; return self.MIN_RAW
-        if r > self.MAX_RAW: self.sat_events += 1; return self.MAX_RAW
-        return r
+    def saturate(self, raw: int) -> int:
+        bounded = min(max(raw, self.MIN_RAW), self.MAX_RAW)
+        self.sat_events += bounded != raw
+        return bounded
 
-    def q(self, x):
-        return self._clamp(math.floor(x * self.SCALE + 0.5))
+    def quantize(self, x: float) -> int:
+        return self.saturate(math.floor(x * self.SCALE + 0.5))
 
-    def mul(self, a, b):
+    def mul(self, a: int, b: int) -> int:
         self.ops += 1
-        return self._clamp((a * b + 32768) // self.SCALE)
+        return self.saturate((a * b + self.SCALE // 2) // self.SCALE)
 
-    def add(self, a, b):
+    def plus(self, a: int, b: int) -> int:
         self.ops += 1
-        return self._clamp(a + b)
+        return self.saturate(a + b)
 
-    def sub(self, a, b):
+    def minus(self, a: int, b: int) -> int:
         self.ops += 1
-        return self._clamp(a - b)
+        return self.saturate(a - b)
 
-    def mat(self, M): return [[self.q(v) for v in row] for row in M]
-    def vec(self, v): return [self.q(x) for x in v]
-    def tof(self, v): return [r / self.SCALE for r in v]
+    def lift(self, v: Sequence[float]) -> list[int]:
+        return [self.quantize(x) for x in v]
 
-    def matvec(self, M, v):
-        out = []
-        for row in M:
-            acc = 0
-            for a, b in zip(row, v):
-                acc = self.add(acc, self.mul(a, b))
-            out.append(acc)
-        return out
+    def lift_matrix(self, m: Matrix) -> list[list[int]]:
+        return [self.lift(row) for row in m]
 
-    def vadd(self, a, b): return [self.add(x, y) for x, y in zip(a, b)]
-    def vsub(self, a, b): return [self.sub(x, y) for x, y in zip(a, b)]
-    def vneg(self, a): return [self._clamp(-x) for x in a]
+    def lower(self, v: Sequence[int]) -> Vector:
+        return [raw / self.SCALE for raw in v]
 
-    def clamp(self, v, lim):
-        l = self.q(lim)
-        return [max(-l, min(l, r)) for r in v]
+    def matvec(self, m: Sequence[Sequence[int]], v: Sequence[int]) -> list[int]:
+        def dot(row: Sequence[int]) -> int:
+            total = 0
+            for a, b in zip(row, v, strict=True):
+                total = self.plus(total, self.mul(a, b))
+            return total
 
-    def inject_overflow(self, v):
-        """A NumericSaturation fault becomes a genuine overflow: a value far outside
-        the representable range is written into the first estimate component."""
-        out = list(v); out[0] = self.q(1.0e5); return out
+        return [dot(row) for row in m]
 
-    def stats(self):
+    def add(self, a: Sequence[int], b: Sequence[int]) -> list[int]:
+        return [self.plus(x, y) for x, y in zip(a, b, strict=True)]
+
+    def sub(self, a: Sequence[int], b: Sequence[int]) -> list[int]:
+        return [self.minus(x, y) for x, y in zip(a, b, strict=True)]
+
+    def neg(self, a: Sequence[int]) -> list[int]:
+        return [self.saturate(-x) for x in a]
+
+    def clamp(self, v: Sequence[int], limit: float) -> list[int]:
+        bound = self.quantize(limit)
+        return [max(-bound, min(bound, raw)) for raw in v]
+
+    def overflow(self, v: Sequence[int]) -> list[int]:
+        return [self.quantize(self.OVERFLOW_PROBE), *v[1:]]
+
+    def stats(self) -> dict[str, int]:
         return {"sat_events": self.sat_events, "fixed_ops": self.ops}
 
-# ----- self-check (runs with: python3 reference/icarus_ref.py --selfcheck) ------
-def _selfcheck():
-    # minimal 2-state plant, hand-stable closed loop, no faults
-    # closed-loop poles {0.8,0.7}, observer poles {0.5,0.4}, verified by hand
-    plant=Plant(2,1,1,
-        A=[[1.1,0.1],[0.0,1.05]], B=[[0.0],[0.5]], C=[[1.0,0.0]],
-        K=[[2.4,1.3]], L=[[1.25],[3.575]])
-    fx={"steps":20,"initial_state":[0.3,-0.2],
-        "disturbance":[[0.0,0.0]]*20,"noise":[[0.0]]*20,"faults":[]}
-    trace,summ=run(plant,fx)
-    # invariants
-    for r in trace:
-        for uc in r.u: assert -CTRL_LIMIT-1e-9<=uc<=CTRL_LIMIT+1e-9, "control out of interval"
-    for a,b in zip(summ["mode_sequence"], summ["mode_sequence"][1:]):
-        assert Mode(b) in LEGAL[Mode(a)], f"illegal {a}->{b}"
-    assert sum(STAGE_BUDGET.values())<=FRAME_BUDGET, "budget overflow"
-    assert median3(100.0,1.0,1.0)==1.0, "single divergent channel dominated median"
-    assert median3(1.0,2.0,3.0)==2.0
-    # selection is exact on doubles: the vote is always one of the inputs, the middle one
-    rng=random.Random(20261002)
-    for _ in range(20000):
-        t=[rng.choice([rng.uniform(-1e6,1e6), rng.uniform(-1,1)*1e-300, 0.0, -0.0, 1e308]) for _ in range(3)]
-        m=median3(*t)
-        assert m in t and m==sorted(t)[1], f"median3{tuple(t)}={m}"
-    assert summ["mode_sequence"][0]=="Ready" and summ["mode_sequence"][1]=="Running"
-    # closed loop with stable gains must shrink the state
-    assert vnorm2(summ["final_state"])<vnorm2(fx["initial_state"]), "did not converge"
-    print("selfcheck OK:",
-          f"final_state={[round(z,4) for z in summ['final_state']]}",
-          f"modes={summ['mode_sequence'][0]}..{summ['mode_sequence'][-1]}")
 
-def main(argv=None):
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--plant",default="fixtures/plant.json")
-    ap.add_argument("--fixture")
-    ap.add_argument("--trace",action="store_true")
-    ap.add_argument("--fixed-point",action="store_true")
-    ap.add_argument("--selfcheck",action="store_true")
-    ap.add_argument("--canonical",action="store_true",help="print ICF canonical output lines")
-    a=ap.parse_args(argv)
-    if a.selfcheck: _selfcheck(); return 0
-    plant=load_plant(a.plant); fx=json.load(open(a.fixture))
-    trace,summ=run(plant,fx,arith=FixedArith() if a.fixed_point else None)
-    if a.canonical:
-        MC={m:i for i,m in enumerate(["Boot","SelfTest","Calibrating","Ready","Running","Degraded","Safe","Fault"])}
-        HC={h:i for i,h in enumerate(["Healthy","Suspect","Degraded","Unsafe"])}
-        FB={"meas":1,"estimator":2,"timing":4,"ctrl_sat":8,"numeric":16}
-        print("M "+" ".join(str(MC[x]) for x in summ["mode_sequence"]))
-        print("H "+" ".join(str(HC[r.health]) for r in trace))
-        print("G "+" ".join(str(sum(FB[f] for f in r.flags)) for r in trace))
-        print("X "+" ".join(str(int(round(z*1e9))) for z in summ["final_state"]))
+def classify(flags: Flag) -> Health:
+    return Health.Unsafe if Flag.NUMERIC in flags else Health(min(flags.bit_count(), Health.Degraded))
+
+
+@dataclass(frozen=True, slots=True)
+class Monitor:
+    mode: Mode = Mode.Ready
+    healthy_streak: int = 0
+    degraded_bad: int = 0
+
+    def decide(self, health: Health, deadline_miss: bool) -> Monitor:
+        mode, bad = self.mode, self.degraded_bad
+        match mode, health:
+            case Mode.Ready, _:
+                mode = Mode.Running
+            case ((Mode.Running | Mode.Degraded), Health.Unsafe):
+                mode = Mode.Safe
+            case Mode.Running, _ if health is Health.Degraded or deadline_miss:
+                mode, bad = Mode.Degraded, 0
+            case Mode.Degraded, Health.Healthy:
+                mode = Mode.Running if self.healthy_streak + 1 >= RECOVERY_FRAMES else Mode.Degraded
+            case Mode.Degraded, _:
+                bad += 1
+                mode = Mode.Safe if bad >= DEGRADED_LIMIT else Mode.Degraded
+        if mode not in LEGAL[self.mode]:
+            raise RuntimeError(f"illegal transition {self.mode.name} -> {mode.name}")
+        streak = self.healthy_streak + 1 if health is Health.Healthy else 0
+        return replace(self, mode=mode, healthy_streak=streak, degraded_bad=bad)
+
+
+@dataclass(frozen=True, slots=True)
+class FrameRecord:
+    k: int
+    mode: Mode
+    health: Health
+    u: tuple[float, ...]
+    y: tuple[float, ...]
+    xhat: tuple[float, ...]
+    x: tuple[float, ...]
+    flags: Flag
+    frame_cost: int
+    deadline_miss: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Run:
+    trace: list[FrameRecord]
+    modes: list[Mode]
+    final_state: Vector
+    final_estimate: Vector
+    arithmetic: dict[str, int]
+
+    @property
+    def final_mode(self) -> Mode:
+        return self.modes[-1]
+
+    def canonical(self) -> dict[str, list[int]]:
+        return {
+            "M": [int(mode) for mode in self.modes],
+            "H": [int(frame.health) for frame in self.trace],
+            "G": [int(frame.flags) for frame in self.trace],
+            "X": [round(z * CANONICAL_SCALE) for z in self.final_state],
+        }
+
+    def canonical_lines(self) -> list[str]:
+        return [" ".join(map(str, (tag, *values))) for tag, values in self.canonical().items()]
+
+
+def acquire(clean: Vector, events: Sequence[FaultEvent], last: Vector) -> tuple[Vector, Flag]:
+    channels = [list(clean) for _ in range(CHANNELS)]
+    flags = Flag(0)
+    for event in events:
+        lane = event.channel
+        match event.kind:
+            case Fault.BiasedMeasurement:
+                channels[0][lane] += event.amount
+            case Fault.StuckChannel:
+                channels[0][lane] = STUCK_VALUE
+            case Fault.OutOfRange:
+                channels[0][lane] = event.value
+            case Fault.MeasurementDropout:
+                for channel in channels:
+                    channel[lane] = last[lane]
+            case _:
+                continue
+        flags |= Flag.MEAS
+    if any(event.kind is Fault.StaleMeasurement for event in events):
+        return list(last), flags | Flag.MEAS
+    return [median3(*samples) for samples in zip(*channels, strict=True)], flags
+
+
+def run(plant: Plant, fixture: Fixture, arithmetic: Arithmetic | None = None) -> Run:
+    arith = FloatArithmetic() if arithmetic is None else arithmetic
+    A, B, C, K, L = map(arith.lift_matrix, (plant.A, plant.B, plant.C, plant.K, plant.L))
+    schedule: defaultdict[int, list[FaultEvent]] = defaultdict(list)
+    for event in fixture.faults:
+        schedule[event.step].append(event)
+
+    x = list(fixture.initial_state)
+    xhat = arith.lift([0.0] * plant.states)
+    u_prev = arith.lift([0.0] * plant.inputs)
+    last = [0.0] * plant.outputs
+    monitor = Monitor()
+    trace: list[FrameRecord] = []
+    modes = [monitor.mode]
+
+    for step, (noise, disturbance) in enumerate(zip(fixture.noise, fixture.disturbance, strict=True)):
+        events = schedule.get(step, [])
+        kinds = {event.kind for event in events}
+
+        voted, flags = acquire(vadd(matvec(plant.C, x), noise), events, last)
+        y = clamp(voted, MEAS_LIMIT)
+        if exceeds(voted, MEAS_LIMIT):
+            flags |= Flag.MEAS
+        last = y
+
+        innovation = arith.sub(arith.lift(y), arith.matvec(C, xhat))
+        if norm2(arith.lower(innovation)) > INNOV_THRESH or Fault.EstimatorDisagreement in kinds:
+            flags |= Flag.ESTIMATOR
+        xhat = arith.add(arith.add(arith.matvec(A, xhat), arith.matvec(B, u_prev)), arith.matvec(L, innovation))
+        if Fault.NumericSaturation in kinds:
+            xhat = arith.overflow(xhat)
+
+        overrun = next((event.overrun for event in events if event.kind is Fault.TimingOverrun), 0)
+        frame_cost = NOMINAL_FRAME_COST + overrun
+        deadline_miss = frame_cost > FRAME_BUDGET
+        if deadline_miss:
+            flags |= Flag.TIMING
+
+        if monitor.mode in (Mode.Running, Mode.Degraded):
+            raw = arith.neg(arith.matvec(K, xhat))
+            limit = plant.control_limit if monitor.mode is Mode.Running else DEGRADED_CTRL
+            if exceeds(arith.lower(raw), limit) or Fault.ControlSaturation in kinds:
+                flags |= Flag.CTRL_SAT
+            u = arith.clamp(raw, limit)
+        else:
+            u = arith.lift([0.0] * plant.inputs)
+
+        estimate = arith.lower(xhat)
+        if Fault.NumericSaturation in kinds or any(not math.isfinite(z) or abs(z) > STATE_BOUND for z in estimate):
+            flags |= Flag.NUMERIC
+
+        health = classify(flags)
+        applied = arith.lower(u)
+        trace.append(
+            FrameRecord(
+                k=step,
+                mode=monitor.mode,
+                health=health,
+                u=tuple(applied),
+                y=tuple(y),
+                xhat=tuple(estimate),
+                x=tuple(x),
+                flags=flags,
+                frame_cost=frame_cost,
+                deadline_miss=deadline_miss,
+            )
+        )
+        monitor = monitor.decide(health, deadline_miss)
+        modes.append(monitor.mode)
+
+        x = vadd(vadd(matvec(plant.A, x), matvec(plant.B, applied)), disturbance)
+        u_prev = u
+
+    return Run(trace, modes, x, arith.lower(xhat), arith.stats())
+
+
+def require(condition: bool, failure: str) -> None:
+    if not condition:
+        raise AssertionError(failure)
+
+
+def selfcheck() -> str:
+    plant = Plant(A=[[1.1, 0.1], [0.0, 1.05]], B=[[0.0], [0.5]], C=[[1.0, 0.0]], K=[[2.4, 1.3]], L=[[1.25], [3.575]])
+    initial = [0.3, -0.2]
+    fixture = Fixture.parse(
+        {"steps": 20, "initial_state": initial, "disturbance": [[0.0, 0.0]] * 20, "noise": [[0.0]] * 20}, plant
+    )
+    result = run(plant, fixture)
+
+    require(all(abs(z) <= CTRL_LIMIT + 1e-9 for frame in result.trace for z in frame.u), "control left [-1, 1]")
+    require(all(after in LEGAL[before] for before, after in pairwise(result.modes)), "illegal transition")
+    require(NOMINAL_FRAME_COST <= FRAME_BUDGET, "stage budgets exceed the frame")
+    require(result.modes[:2] == [Mode.Ready, Mode.Running], "did not engage from Ready")
+    require(norm2(result.final_state) < norm2(initial), "stable closed loop did not shrink the state")
+    require(median3(100.0, 1.0, 1.0) == 1.0, "one divergent channel moved the vote")
+    require(median3(1.0, 2.0, 3.0) == 2.0, "vote is not the median")
+
+    rng = random.Random(20261002)
+    for _ in range(20000):
+        triple = [rng.choice([rng.uniform(-1e6, 1e6), rng.uniform(-1, 1) * 1e-300, 0.0, -0.0, 1e308]) for _ in range(3)]
+        vote = median3(*triple)
+        require(vote in triple and vote == sorted(triple)[1], f"median3{tuple(triple)} = {vote}")
+
+    return (
+        f"selfcheck OK: final_state={[round(z, 4) for z in result.final_state]} "
+        f"modes={result.modes[0].name}..{result.final_mode.name}"
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--plant", type=Path, default=PLANT_PATH)
+    parser.add_argument("--fixture", type=Path)
+    parser.add_argument("--fixed-point", action="store_true")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--trace", action="store_true")
+    output.add_argument("--canonical", action="store_true")
+    output.add_argument("--selfcheck", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.selfcheck:
+        print(selfcheck())
         return 0
-    if a.trace:
-        for r in trace:
-            print(f"k={r.k:02d} {r.mode:9s} {r.health:8s} "
-                  f"u={[round(z,4) for z in r.u]} flags={r.flags} "
-                  f"miss={int(r.deadline_miss)}")
-    print(json.dumps({"final_mode":summ["final_mode"],
-                      "final_state":[round(z,6) for z in summ["final_state"]],
-                      "modes":summ["mode_sequence"]}, indent=2))
+    if args.fixture is None:
+        parser.error("--fixture is required")
+    try:
+        plant = Plant.load(args.plant)
+        result = run(plant, Fixture.load(args.fixture, plant), FixedArithmetic() if args.fixed_point else None)
+    except (OSError, FixtureError) as error:
+        parser.exit(2, f"icarus_ref: {error}\n")
+
+    if args.canonical:
+        print("\n".join(result.canonical_lines()))
+        return 0
+    if args.trace:
+        for frame in result.trace:
+            print(
+                f"k={frame.k:02d} {frame.mode.name:9s} {frame.health.name:8s} "
+                f"u={[round(z, 4) for z in frame.u]} flags={frame.flags.labels} miss={int(frame.deadline_miss)}"
+            )
+    print(
+        json.dumps(
+            {
+                "final_mode": result.final_mode.name,
+                "final_state": [round(z, 6) for z in result.final_state],
+                "modes": [mode.name for mode in result.modes],
+            },
+            indent=2,
+        )
+    )
     return 0
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     sys.exit(main())

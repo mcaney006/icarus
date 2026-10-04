@@ -1,53 +1,122 @@
 #!/usr/bin/env python3
-"""The verified F* saturating arithmetic against the Python fixed-point backend.
+from __future__ import annotations
 
-Both realise the same word (Q15.16 style, 2^16 raw units per 1.0, raw range
-[-2^31, 2^31-1], round-half-up rescale). Vectors: every pairing of the boundary
-values, plus pseudo-random pairs at several magnitudes from a fixed seed.
-"""
-import os, subprocess, sys, tempfile
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "reference"))
+import argparse
+import subprocess
+import sys
+from collections.abc import Callable
+from itertools import product
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "reference"))
 import icarus_ref as ref
 
-EXE = os.path.join(ROOT, "fstar", "out", "icarus_sat")
-LO, HI = ref.FixedArith.MIN_RAW, ref.FixedArith.MAX_RAW
-EDGES = [LO, LO + 1, -65536 * 32768, -65537, -65536, -32769, -32768, -1, 0, 1, 32767, 32768,
-         65535, 65536, 65537, 65536 * 32767, HI - 1, HI]
+EXECUTABLE = ref.ROOT / "fstar" / "out" / "icarus_sat"
+FIXED = ref.FixedArithmetic
+LO, HI = FIXED.MIN_RAW, FIXED.MAX_RAW
+OPERATIONS: dict[str, Callable[[ref.FixedArithmetic], Callable[[int, int], int]]] = {
+    "a": lambda word: word.plus,
+    "s": lambda word: word.minus,
+    "m": lambda word: word.mul,
+}
+EDGES = (
+    LO,
+    LO + 1,
+    -65536 * 32768,
+    -65537,
+    -65536,
+    -32769,
+    -32768,
+    -1,
+    0,
+    1,
+    32767,
+    32768,
+    65535,
+    65536,
+    65537,
+    65536 * 32767,
+    HI - 1,
+    HI,
+)
+WIDTHS = (2**8, 2**16, 2**24, 2**31)
+SAMPLES_PER_WIDTH = 500
+TIMEOUT_SECONDS = 120
 
-class Lcg:
-    def __init__(self, s): self.s = s
-    def next(self, lo, hi):
-        self.s = (self.s * 6364136223846793005 + 1442695040888963407) & (2**64 - 1)
-        return lo + (self.s >> 11) % (hi - lo + 1)
+Case = tuple[str, int, int]
+Outcome = tuple[int, int]
 
-def vectors():
-    v = [(op, a, b) for op in "asm" for a in EDGES for b in EDGES]
-    g = Lcg(20261002)
-    for width in (2**8, 2**16, 2**24, 2**31):
-        for op in "asm":
-            for _ in range(500):
-                v.append((op, g.next(max(LO, -width), min(HI, width - 1)),
-                              g.next(max(LO, -width), min(HI, width - 1))))
-    return v
 
-def python_result(op, a, b):
-    f = ref.FixedArith()
-    r = {"a": f.add, "s": f.sub, "m": f.mul}[op](a, b)
-    return r, int(f.sat_events > 0)
+def cases() -> list[Case]:
+    states = ref.lcg(20261002)
 
-def main():
-    if not os.path.exists(EXE):
-        print("satcheck: SKIP (build fstar first)"); return 0 if "--strict" not in sys.argv else 1
-    vs = vectors()
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as t:
-        t.write("".join(f"{op} {a} {b}\n" for op, a, b in vs)); path = t.name
-    out = subprocess.run([EXE, path], capture_output=True, text=True, check=True).stdout.split("\n")[:-1]
-    os.unlink(path)
-    bad = [(v, o) for v, o in zip(vs, out) if tuple(map(int, o.split())) != python_result(*v)]
-    sat = sum(int(o.split()[1]) for o in out)
-    print(f"satcheck: {len(vs)} vectors ({sat} saturating), {len(bad)} disagreements")
-    for v, o in bad[:5]: print("  ", v, "fstar:", o, "python:", python_result(*v))
-    return 1 if bad or len(out) != len(vs) else 0
+    def uniform(lo: int, hi: int) -> int:
+        return lo + (next(states) >> 11) % (hi - lo + 1)
 
-if __name__ == "__main__": sys.exit(main())
+    def pair(width: int) -> tuple[int, int]:
+        lo, hi = max(LO, -width), min(HI, width - 1)
+        return uniform(lo, hi), uniform(lo, hi)
+
+    return [
+        *product(OPERATIONS, EDGES, EDGES),
+        *((op, *pair(width)) for width in WIDTHS for op in OPERATIONS for _ in range(SAMPLES_PER_WIDTH)),
+    ]
+
+
+def reference(op: str, a: int, b: int) -> Outcome:
+    word = FIXED()
+    return OPERATIONS[op](word)(a, b), int(word.sat_events > 0)
+
+
+def outcomes(stdout: str) -> list[Outcome]:
+    parsed = []
+    for line in stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not all(field.lstrip("-").isdigit() for field in fields):
+            raise ValueError(f"malformed icarus_sat line {line[:60]!r}")
+        parsed.append((int(fields[0]), int(fields[1])))
+    return parsed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--strict", action="store_true")
+    args = parser.parse_args()
+
+    if not EXECUTABLE.exists():
+        print("satcheck: SKIP (build fstar first)")
+        return int(args.strict)
+    vectors = cases()
+    expected = [reference(*case) for case in vectors]
+    try:
+        result = subprocess.run(
+            [EXECUTABLE, "/dev/stdin"],
+            input="".join(f"{op} {a} {b}\n" for op, a, b in vectors),
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+        if result.returncode:
+            raise ValueError(f"icarus_sat exited {result.returncode}: {result.stderr.strip()[:200]}")
+        got = outcomes(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        print(f"satcheck: {error}")
+        return 1
+    if len(got) != len(vectors):
+        print(f"satcheck: icarus_sat answered {len(got)} of {len(vectors)} vectors")
+        return 1
+
+    disagreements = [
+        (case, actual, wanted) for case, actual, wanted in zip(vectors, got, expected, strict=True) if actual != wanted
+    ]
+    print(
+        f"satcheck: {len(vectors)} vectors ({sum(flag for _, flag in expected)} saturating), "
+        f"{len(disagreements)} disagreements"
+    )
+    for case, actual, wanted in disagreements[:5]:
+        print("  ", case, "fstar:", actual, "python:", wanted)
+    return int(bool(disagreements))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

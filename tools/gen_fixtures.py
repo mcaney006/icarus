@@ -1,200 +1,241 @@
 #!/usr/bin/env python3
-"""Deterministic generator for the shared interchange files.
+from __future__ import annotations
 
-Produces fixtures/plant.json (synthetic matrices + gains designed here, once) and
-the scenario fixtures. Gains come from a discrete-time LQR solved by Riccati
-iteration (numpy, fixed Q/R) so the constants are reproducible and clearly
-artificial. Disturbance/noise are drawn from a fixed-seed LCG and baked into the
-fixtures as explicit arrays, so the four typed languages read identical inputs
-without re-implementing any PRNG. The reference oracle then fills each fixture's
-expected mode sequence and final state.
-"""
-import json, os, sys
+import json
+import sys
+from collections.abc import Iterator, Sequence
+from itertools import islice
+from pathlib import Path
+
 import numpy as np
 
-HERE=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(HERE,"reference"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "reference"))
 import icarus_ref as ref
 
-np.set_printoptions(suppress=True)
+FIXTURES = ref.ROOT / "fixtures"
+INITIAL_STATE = [0.5, -0.3, 0.4, -0.2]
+TOLERANCE = 1e-6
 
-# ----- synthetic plant (no physical meaning; chosen for mathematical testing) ---
-A=np.array([[1.00,0.20,0.00,0.00],
-            [0.00,1.05,0.10,0.00],
-            [0.00,0.00,1.00,0.20],
-            [0.05,0.00,0.00,1.08]])
-B=np.array([[0.0,0.0],[0.5,0.0],[0.0,0.0],[0.0,0.5]])
-C=np.array([[1.0,0.0,0.0,0.0],[0.0,0.0,1.0,0.0]])
-
-def dlqr(A,B,Q,R,iters=4000,tol=1e-12):
-    P=Q.copy()
-    for _ in range(iters):
-        K=np.linalg.solve(R+B.T@P@B, B.T@P@A)
-        Pn=Q+A.T@P@A - A.T@P@B@K
-        if np.max(np.abs(Pn-P))<tol: P=Pn; break
-        P=Pn
-    K=np.linalg.solve(R+B.T@P@B, B.T@P@A)
-    return K
-
-def spectral_radius(M): return float(np.max(np.abs(np.linalg.eigvals(M))))
-
-def design():
-    n=A.shape[0]; m=B.shape[1]; p=C.shape[0]
-    K=dlqr(A,B,np.eye(n),np.eye(m))
-    # observer gain via LQR on the dual system (A^T, C^T)
-    Ko=dlqr(A.T,C.T,np.eye(n),np.eye(p))
-    L=Ko.T
-    rho_ol=spectral_radius(A)
-    rho_cl=spectral_radius(A-B@K)
-    rho_ob=spectral_radius(A-L@C)
-    assert rho_ol>1.0,   f"plant must be open-loop unstable, got rho={rho_ol}"
-    assert rho_cl<1.0,   f"closed loop must be stable, got rho={rho_cl}"
-    assert rho_ob<1.0,   f"observer must be stable, got rho={rho_ob}"
-    return K,L,dict(open_loop_rho=rho_ol,closed_loop_rho=rho_cl,observer_rho=rho_ob)
-
-def write_plant(K,L,eig):
-    plant=dict(
-        dims=dict(n=4,m=2,p=2),
-        A=A.tolist(), B=B.tolist(), C=C.tolist(),
-        K=K.tolist(), L=L.tolist(),
-        control_limit=ref.CTRL_LIMIT,
-        fixed_point=dict(frac_bits=16,int_bits=15,scale=65536,
-                         min=-32768.0, max=32767.0+65535/65536.0,
-                         note="artificial Q15.16; not a hardware word size"),
-        budget=dict(frame=ref.FRAME_BUDGET, stages=ref.STAGE_BUDGET,
-                    margin=ref.FRAME_BUDGET-sum(ref.STAGE_BUDGET.values())),
-        eigen={k:round(v,6) for k,v in eig.items()},
-        note="Dimensionless synthetic plant. Not derived from any real vehicle.")
-    json.dump(plant, open(f"{HERE}/fixtures/plant.json","w"), indent=2)
-    return plant
-
-class LCG:
-    def __init__(self,seed): self.s=seed & ((1<<64)-1)
-    def nxt(self):
-        self.s=(self.s*6364136223846793005+1442695040888963407)&((1<<64)-1)
-        return (self.s>>11)/float(1<<53)
-    def centered(self,amp):  # value in [-amp, amp]
-        return round((self.nxt()*2.0-1.0)*amp, 9)
-
-def seq(rng,count,dim,amp):
-    return [[rng.centered(amp) for _ in range(dim)] for _ in range(count)]
-
-def build(name,seed,steps,x0,amp_w,amp_v,faults):
-    rng=LCG(seed)
-    return dict(name=name, dims=dict(n=4,m=2,p=2), steps=steps, seed=seed,
-                initial_state=x0,
-                disturbance=seq(rng,steps,4,amp_w),
-                noise=seq(rng,steps,2,amp_v),
-                faults=faults, tolerance=1e-6, fixed_scale=65536)
+A = np.array([[1.00, 0.20, 0.00, 0.00], [0.00, 1.05, 0.10, 0.00], [0.00, 0.00, 1.00, 0.20], [0.05, 0.00, 0.00, 1.08]])
+B = np.array([[0.0, 0.0], [0.5, 0.0], [0.0, 0.0], [0.0, 0.5]])
+C = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])
+DIMS = dict(zip("nmp", (A.shape[0], B.shape[1], C.shape[0]), strict=True))
 
 
-FLAGBIT={"meas":1,"estimator":2,"timing":4,"ctrl_sat":8,"numeric":16}
-MODE_CODE={m:i for i,m in enumerate(["Boot","SelfTest","Calibrating","Ready","Running","Degraded","Safe","Fault"])}
-HEALTH_CODE={h:i for i,h in enumerate(["Healthy","Suspect","Degraded","Unsafe"])}
-FAULT_CODE={k:i for i,k in enumerate(["MeasurementDropout","StaleMeasurement","BiasedMeasurement",
-  "StuckChannel","OutOfRange","TimingOverrun","NumericSaturation","CorruptFixture",
-  "EstimatorDisagreement","ControlSaturation"])}
-SC=10**9
-def q(v): return int(round(v*SC))
+def dlqr(
+    a: np.ndarray, b: np.ndarray, q: np.ndarray, r: np.ndarray, iterations: int = 4000, tolerance: float = 1e-12
+) -> np.ndarray:
+    def gain(p: np.ndarray) -> np.ndarray:
+        return np.linalg.solve(r + b.T @ p @ b, b.T @ p @ a)
 
-def fnv1a(data:bytes)->int:
-    h=0x811C9DC5
-    for b in data:
-        h=((h^b)*0x01000193)&0xFFFFFFFF
-    return h
+    p = q.copy()
+    for _ in range(iterations):
+        p_next = q + a.T @ p @ a - a.T @ p @ b @ gain(p)
+        converged = np.max(np.abs(p_next - p)) < tolerance
+        p = p_next
+        if converged:
+            return gain(p)
+    raise RuntimeError(f"Riccati iteration did not converge within {iterations} steps")
 
-def write_icf(path, plant, fx, trace, summ):
-    L=[f"# icarus fixture {fx['name']}"]
-    n,m,p=plant["dims"]["n"],plant["dims"]["m"],plant["dims"]["p"]
-    L.append(f"D {n} {m} {p} {fx['steps']}")
-    flat=lambda M:" ".join(str(q(v)) for row in M for v in row)
-    for tag in "ABCKL": L.append(f"{tag} "+flat(plant[tag]))
-    L.append("X "+" ".join(str(q(v)) for v in fx["initial_state"]))
-    L.append(f"T {q(fx['tolerance'])}")
-    for k,w in enumerate(fx["disturbance"]): L.append(f"W {k} "+" ".join(str(q(v)) for v in w))
-    for k,v in enumerate(fx["noise"]):       L.append(f"V {k} "+" ".join(str(q(z)) for z in v))
-    for f in fx["faults"]:
-        kind=f["kind"]; ch=f.get("channel",0)
-        param={"BiasedMeasurement":f.get("amount",20.0),"OutOfRange":f.get("value",1.0e6),
-               "TimingOverrun":float(f.get("overrun",250))}.get(kind,0.0)
-        L.append(f"F {f['step']} {FAULT_CODE[kind]} {ch} {q(param)}")
-    L.append("M "+" ".join(str(MODE_CODE[x]) for x in summ["mode_sequence"]))
-    L.append("H "+" ".join(str(HEALTH_CODE[r.health]) for r in trace))
-    L.append("G "+" ".join(str(sum(FLAGBIT[x] for x in r.flags)) for r in trace))
-    L.append("E "+" ".join(str(q(v)) for v in summ["final_state"]))
-    body="\n".join(L)+"\n"
-    open(path,"w").write(body+f"Z {fnv1a(body.encode())}\n")
 
-def finalize(plant_path, fx):
-    plant=ref.load_plant(plant_path)
-    _,summ=ref.run(plant, fx)
-    fx["expected"]=dict(mode_sequence=summ["mode_sequence"],
-                        final_state=[round(z,9) for z in summ["final_state"]],
-                        final_estimate=[round(z,9) for z in summ["final_estimate"]],
-                        final_mode=summ["final_mode"])
-    return fx
+def spectral_radius(m: np.ndarray) -> float:
+    return float(np.max(np.abs(np.linalg.eigvals(m))))
 
-def main():
-    K,L,eig=design()
-    K=np.round(K,9); L=np.round(L,9)
-    write_plant(K,L,eig)
-    pp=f"{HERE}/fixtures/plant.json"
-    x0=[0.5,-0.3,0.4,-0.2]
-    scenarios=[
-        build("nominal", 20261002, 40, x0, 0.01, 0.01, []),
-        build("faults",  20261003, 40, x0, 0.01, 0.01, [
-            {"step":10,"kind":"BiasedMeasurement","channel":0,"amount":25.0},
-            {"step":15,"kind":"MeasurementDropout","channel":1},
-            {"step":20,"kind":"TimingOverrun","overrun":300},
-        ]),
-        build("final_experiment", 20261004, 48, x0, 0.015, 0.02, [
-            {"step":8, "kind":"BiasedMeasurement","channel":0,"amount":18.0},
-            {"step":12,"kind":"MeasurementDropout","channel":1},
-            {"step":13,"kind":"MeasurementDropout","channel":1},
-            {"step":20,"kind":"TimingOverrun","overrun":260},
-            {"step":28,"kind":"NumericSaturation"},
-        ]),
+
+def design() -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    K = dlqr(A, B, np.eye(DIMS["n"]), np.eye(DIMS["m"]))
+    L = dlqr(A.T, C.T, np.eye(DIMS["n"]), np.eye(DIMS["p"])).T
+    radii = {
+        "open_loop_rho": spectral_radius(A),
+        "closed_loop_rho": spectral_radius(A - B @ K),
+        "observer_rho": spectral_radius(A - L @ C),
+    }
+    if not radii["open_loop_rho"] > 1.0 > max(radii["closed_loop_rho"], radii["observer_rho"]):
+        raise RuntimeError(f"plant must be open-loop unstable with a stable closed loop and observer: {radii}")
+    return np.round(K, 9), np.round(L, 9), radii
+
+
+def plant_spec(K: np.ndarray, L: np.ndarray, radii: dict[str, float]) -> dict:
+    word = ref.FixedArithmetic
+    frac_bits = word.SCALE.bit_length() - 1
+    return {
+        "dims": DIMS,
+        "A": A.tolist(),
+        "B": B.tolist(),
+        "C": C.tolist(),
+        "K": K.tolist(),
+        "L": L.tolist(),
+        "control_limit": ref.CTRL_LIMIT,
+        "fixed_point": {
+            "frac_bits": frac_bits,
+            "int_bits": word.MAX_RAW.bit_length() - frac_bits,
+            "scale": word.SCALE,
+            "min": word.MIN_RAW / word.SCALE,
+            "max": word.MAX_RAW / word.SCALE,
+            "note": "artificial Q15.16; not a hardware word size",
+        },
+        "budget": {
+            "frame": ref.FRAME_BUDGET,
+            "stages": ref.STAGE_BUDGET,
+            "margin": ref.FRAME_BUDGET - ref.NOMINAL_FRAME_COST,
+        },
+        "eigen": {name: round(rho, 6) for name, rho in radii.items()},
+        "note": "Dimensionless synthetic plant. Not derived from any real vehicle.",
+    }
+
+
+def centered(states: Iterator[int], amplitude: float) -> Iterator[float]:
+    for state in states:
+        yield round(((state >> 11) / float(1 << 53) * 2.0 - 1.0) * amplitude, 9)
+
+
+def fault(step: int, kind: ref.Fault, **parameters: float) -> dict:
+    return {"step": step, "kind": kind.name, **parameters}
+
+
+def overrun(step: int, ticks: int) -> dict:
+    return fault(step, ref.Fault.TimingOverrun, overrun=ticks)
+
+
+CASCADE = [
+    overrun(10, 300),
+    *(
+        fault(step, kind)
+        for step in (11, 12, 13)
+        for kind in (ref.Fault.EstimatorDisagreement, ref.Fault.ControlSaturation)
+    ),
+]
+
+
+def scenario(
+    name: str, seed: int, steps: int, faults: list[dict], disturbance: float = 0.01, noise: float = 0.01
+) -> dict:
+    states = ref.lcg(seed)
+
+    def draw(dim: int, amplitude: float) -> list[list[float]]:
+        return [list(islice(centered(states, amplitude), dim)) for _ in range(steps)]
+
+    disturbances = draw(DIMS["n"], disturbance)
+    noises = draw(DIMS["p"], noise)
+    return {
+        "name": name,
+        "dims": DIMS,
+        "steps": steps,
+        "seed": seed,
+        "initial_state": INITIAL_STATE,
+        "disturbance": disturbances,
+        "noise": noises,
+        "faults": faults,
+        "tolerance": TOLERANCE,
+        "fixed_scale": ref.FixedArithmetic.SCALE,
+    }
+
+
+def scaled(values: Sequence[float]) -> str:
+    return " ".join(str(round(v * ref.CANONICAL_SCALE)) for v in values)
+
+
+def icf(spec: dict, fixture: dict, events: Sequence[ref.FaultEvent], result: ref.Run) -> str:
+    dims, canonical = spec["dims"], result.canonical()
+    return ref.seal(
+        [
+            f"# icarus fixture {fixture['name']}",
+            f"D {dims['n']} {dims['m']} {dims['p']} {fixture['steps']}",
+            *(f"{tag} {scaled([v for row in spec[tag] for v in row])}" for tag in "ABCKL"),
+            f"X {scaled(fixture['initial_state'])}",
+            f"T {scaled([fixture['tolerance']])}",
+            *(f"W {k} {scaled(w)}" for k, w in enumerate(fixture["disturbance"])),
+            *(f"V {k} {scaled(v)}" for k, v in enumerate(fixture["noise"])),
+            *(f"F {e.step} {int(e.kind)} {e.channel} {scaled([e.parameter])}" for e in events),
+            *(" ".join(map(str, (tag, *canonical[tag]))) for tag in "MHG"),
+            f"E {scaled(result.final_state)}",
+        ]
+    )
+
+
+def suite() -> list[tuple[str, dict]]:
+    def single(name: str, seed: int, *faults: dict) -> tuple[str, dict]:
+        return name, scenario(name, seed, 30, list(faults))
+
+    F = ref.Fault
+    return [
+        ("fixture_01_nominal", scenario("nominal", 20261002, 40, [])),
+        (
+            "fixture_02_faults",
+            scenario(
+                "faults",
+                20261003,
+                40,
+                [
+                    fault(10, F.BiasedMeasurement, channel=0, amount=25.0),
+                    fault(15, F.MeasurementDropout, channel=1),
+                    overrun(20, 300),
+                ],
+            ),
+        ),
+        (
+            "final_experiment",
+            scenario(
+                "final_experiment",
+                20261004,
+                48,
+                [
+                    fault(8, F.BiasedMeasurement, channel=0, amount=18.0),
+                    fault(12, F.MeasurementDropout, channel=1),
+                    fault(13, F.MeasurementDropout, channel=1),
+                    overrun(20, 260),
+                    fault(28, F.NumericSaturation),
+                ],
+                disturbance=0.015,
+                noise=0.02,
+            ),
+        ),
+        single(
+            "fault_dropout",
+            20261101,
+            fault(10, F.MeasurementDropout, channel=0),
+            fault(11, F.MeasurementDropout, channel=0),
+        ),
+        single("fault_stale", 20261102, fault(10, F.StaleMeasurement), fault(11, F.StaleMeasurement)),
+        single("fault_bias", 20261103, fault(10, F.BiasedMeasurement, channel=0, amount=25.0)),
+        single("fault_stuck", 20261104, fault(10, F.StuckChannel, channel=1)),
+        single("fault_range", 20261105, fault(10, F.OutOfRange, channel=0, value=1.0e6)),
+        single("fault_overrun", 20261106, overrun(10, 300)),
+        single("fault_numeric", 20261107, fault(10, F.NumericSaturation)),
+        single("fault_estimator", 20261108, fault(10, F.EstimatorDisagreement)),
+        single("fault_ctrlsat", 20261109, fault(10, F.ControlSaturation)),
+        single("fault_cascade", 20261110, *CASCADE),
     ]
-    def one(name, seed, faults, steps=30):
-        return build(name, seed, steps, x0, 0.01, 0.01, faults)
-    suite=[
-      one("fault_dropout",    20261101, [{"step":10,"kind":"MeasurementDropout","channel":0},
-                                         {"step":11,"kind":"MeasurementDropout","channel":0}]),
-      one("fault_stale",      20261102, [{"step":10,"kind":"StaleMeasurement"},
-                                         {"step":11,"kind":"StaleMeasurement"}]),
-      one("fault_bias",       20261103, [{"step":10,"kind":"BiasedMeasurement","channel":0,"amount":25.0}]),
-      one("fault_stuck",      20261104, [{"step":10,"kind":"StuckChannel","channel":1}]),
-      one("fault_range",      20261105, [{"step":10,"kind":"OutOfRange","channel":0,"value":1.0e6}]),
-      one("fault_overrun",    20261106, [{"step":10,"kind":"TimingOverrun","overrun":300}]),
-      one("fault_numeric",    20261107, [{"step":10,"kind":"NumericSaturation"}]),
-      one("fault_estimator",  20261108, [{"step":10,"kind":"EstimatorDisagreement"}]),
-      one("fault_ctrlsat",    20261109, [{"step":10,"kind":"ControlSaturation"}]),
-      # overrun degrades; two flags per frame keeps it Degraded and bad frames accumulate to Safe
-      one("fault_cascade",    20261110, [{"step":10,"kind":"TimingOverrun","overrun":300},
-                                         {"step":11,"kind":"EstimatorDisagreement"},{"step":11,"kind":"ControlSaturation"},
-                                         {"step":12,"kind":"EstimatorDisagreement"},{"step":12,"kind":"ControlSaturation"},
-                                         {"step":13,"kind":"EstimatorDisagreement"},{"step":13,"kind":"ControlSaturation"}]),
-    ]
-    scenarios=scenarios+suite
-    names={"nominal":"fixture_01_nominal.json","faults":"fixture_02_faults.json",
-           "final_experiment":"final_experiment.json"}
-    for fx in suite: names[fx["name"]]=fx["name"]+".json"
-    for fx in scenarios:
-        fx=finalize(pp, fx)
-        out=f"{HERE}/fixtures/{names[fx['name']]}"
-        json.dump(fx, open(out,"w"), indent=2)
-        plant_d=json.load(open(pp))
-        plant_obj=ref.load_plant(pp)
-        trace,summ=ref.run(plant_obj, fx)
-        write_icf(out.replace(".json",".icf"), plant_d, fx, trace, summ)
-        exp=fx["expected"]
-        seq_modes=exp["mode_sequence"]
-        print(f"{fx['name']:16s} steps={fx['steps']:3d} "
-              f"modes:{seq_modes[0]}..{seq_modes[-1]} "
-              f"final_mode={exp['final_mode']} "
-              f"|x_final|={sum(z*z for z in exp['final_state'])**0.5:.4f}")
-    print("eigen:", {k:round(v,4) for k,v in eig.items()})
-    print("gains K=",np.round(K,4).tolist())
-    print("gains L=",np.round(L,4).tolist())
 
-if __name__=="__main__": main()
+
+def main() -> None:
+    K, L, radii = design()
+    spec = plant_spec(K, L, radii)
+    ref.PLANT_PATH.write_text(json.dumps(spec, indent=2))
+    plant = ref.Plant.load()
+
+    for stem, fixture in suite():
+        parsed = ref.Fixture.parse(fixture, plant)
+        result = ref.run(plant, parsed)
+        fixture["expected"] = {
+            "mode_sequence": [mode.name for mode in result.modes],
+            "final_state": [round(z, 9) for z in result.final_state],
+            "final_estimate": [round(z, 9) for z in result.final_estimate],
+            "final_mode": result.final_mode.name,
+        }
+        (FIXTURES / f"{stem}.json").write_text(json.dumps(fixture, indent=2))
+        (FIXTURES / f"{stem}.icf").write_text(icf(spec, fixture, parsed.faults, result))
+        final = fixture["expected"]["final_state"]
+        print(
+            f"{fixture['name']:16s} steps={fixture['steps']:3d} "
+            f"modes:{result.modes[0].name}..{result.final_mode.name} final_mode={result.final_mode.name} "
+            f"|x_final|={sum(z * z for z in final) ** 0.5:.4f}"
+        )
+
+    print("eigen:", {name: round(rho, 4) for name, rho in radii.items()})
+    print("gains K=", np.round(K, 4).tolist())
+    print("gains L=", np.round(L, 4).tolist())
+
+
+if __name__ == "__main__":
+    main()
