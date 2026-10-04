@@ -2,310 +2,236 @@
 #include "share/atspre_staload.hats"
 staload "./fixture.sats"
 
+#define VALUE_CAPACITY 160
+#define FNV_OFFSET 0x811C9DC5u
+#define FNV_PRIME 16777619u
+#define WIRE_SCALE 1.0e9
+
 %{^
 extern long icarus_read_file(const char*, char*, long);
 %}
-extern fun read_file {n:nat} (path: string, buf: !arrayptr(char, n), cap: int(n)): int
-  = "mac#icarus_read_file"
+extern fun read_file {n:nat} (path: string, buf: !arrayptr(char, n), cap: int(n)): int = "mac#icarus_read_file"
 
-(* ---- checksum: FNV-1a over every byte before the Z line ------------------- *)
+vtypedef input = arrayptr(char, INPUT_CAPACITY)
+vtypedef values = arrayptr(double, VALUE_CAPACITY)
+typedef tally = [c:int | ~1 <= c; c <= VALUE_CAPACITY] int(c)
 
-fun hash_line {l:nat | l <= 65536} {i:nat | i < l} .<l-i>.
-  (buf: !arrayptr(char, 65536), len: int(l), i: int(i), h: uint)
-  : [k:nat | i < k; k <= l] @(int(k), uint) = let
+datatype seal = SEALED | TAMPERED | UNSEALED
+
+fun digit_value (c: char): double = g0int2float_int_double(char2int0(c) - char2int0('0'))
+
+fun is_digit (c: char): bool = c >= '0' andalso c <= '9'
+
+fun hash_line {l:nat | l <= INPUT_CAPACITY} {i:nat | i < l} .<l-i>.
+  (buf: !input, len: int(l), i: int(i), hash: uint): [k:nat | i < k; k <= l] @(int(k), uint) = let
   val c = arrayptr_get_at(buf, i)
-  val h1 = (h lxor g0int2uint_int_uint(char2int0(c))) * 16777619u
+  val mixed = (hash lxor g0int2uint_int_uint(char2int0(c))) * FNV_PRIME
 in
-  if c = '\n' then @(i + 1, h1)
-  else if i + 1 < len then hash_line(buf, len, i + 1, h1)
-  else @(i + 1, h1)
+  if c = '\n' then @(i + 1, mixed)
+  else if i + 1 < len then hash_line(buf, len, i + 1, mixed)
+  else @(i + 1, mixed)
 end
 
-fun z_value {l:nat | l <= 65536} {i:nat | i <= l} .<l-i>.
-  (buf: !arrayptr(char, 65536), len: int(l), i: int(i), acc: double, started: bool): @(double, bool) =
+fun digest {l:nat | l <= INPUT_CAPACITY} {i:nat | i <= l} .<l-i>.
+  (buf: !input, len: int(l), i: int(i), acc: double, seen: bool): @(double, bool) =
   if i < len then let
     val c = arrayptr_get_at(buf, i)
   in
-    if c >= '0' andalso c <= '9' then
-      z_value(buf, len, i + 1, acc * 10.0 + g0int2float_int_double(char2int0(c) - 48), true)
-    else if c = ' ' andalso not(started) then z_value(buf, len, i + 1, acc, started)
-    else @(acc, started)
-  end else @(acc, started)
-
-(* 1 verified, 0 mismatch, ~1 missing or malformed *)
-fun verify {l:nat | l <= 65536} {i:nat | i <= l} .<l-i>.
-  (buf: !arrayptr(char, 65536), len: int(l), i: int(i), h: uint): int =
-  if i >= len then ~1
-  else let
-    val c = arrayptr_get_at(buf, i)
-  in
-    if c = 'Z' then let
-      val @(z, ok) = z_value(buf, len, i + 1, 0.0, false)
-    in
-      if ok then (if z = g0int2float_lint_double(g0uint2int_uint_lint(h)) then 1 else 0) else ~1
-    end
-    else let
-      val @(k, h1) = hash_line(buf, len, i, h)
-    in verify(buf, len, k, h1) end
+    if is_digit(c) then digest(buf, len, i + 1, acc * 10.0 + digit_value(c), true)
+    else if c = ' ' andalso not(seen) then digest(buf, len, i + 1, acc, seen)
+    else @(acc, seen)
   end
+  else @(acc, seen)
 
-(* ---- one record line: tag, then integers ---------------------------------- *)
+fun verify {l:nat | l <= INPUT_CAPACITY} {i:nat | i <= l} .<l-i>.
+  (buf: !input, len: int(l), i: int(i), hash: uint): seal =
+  if i >= len then UNSEALED
+  else if arrayptr_get_at(buf, i) = 'Z' then let
+    val @(claimed, present) = digest(buf, len, i + 1, 0.0, false)
+  in
+    if not(present) then UNSEALED
+    else if claimed = g0int2float_lint_double(g0uint2int_uint_lint(hash)) then SEALED
+    else TAMPERED
+  end
+  else let val @(next, hash) = hash_line(buf, len, i, hash) in verify(buf, len, next, hash) end
 
-(* The clamp is the bounds check: it yields an index the solver can see is in
-   range, and the callers below reject any record whose count is out of range
-   before the clamped value could ever matter. *)
-fun idx160 (c: int): [i:nat | i < 160] int(i) = let
-  val c1 = g1ofg0(c)
-in
-  if c1 >= 0 then (if c1 < 160 then c1 else 0) else 0
-end
+fun commit {c:nat | c <= VALUE_CAPACITY}
+  (vals: !values, pending: bool, count: int(c), negative: bool, magnitude: double): tally =
+  if not(pending) then count
+  else if count < VALUE_CAPACITY then
+    (arrayptr_set_at(vals, count, (if negative then ~magnitude else magnitude): double); count + 1)
+  else ~1
 
-fun store (vals: !arrayptr(double, 160), cnt: int, v: double): int = let
-  val i = idx160(cnt)
-  val () = arrayptr_set_at(vals, i, v)
-in
-  if cnt >= 0 then (if cnt < 160 then cnt + 1 else ~1) else ~1
-end
-
-(* Always touches the array; when nothing is pending it writes back what is there. *)
-fun commit (vals: !arrayptr(double, 160), inum: bool, cnt: int, neg: bool, cur: double): int = let
-  val i = idx160(cnt)
-  val old = arrayptr_get_at(vals, i)
-  val v = (if neg then ~cur else cur): double
-  val () = arrayptr_set_at(vals, i, (if inum then v else old): double)
-in
-  if inum then (if cnt >= 0 then (if cnt < 160 then cnt + 1 else ~1) else ~1) else cnt
-end
-
-fun get_val (vals: !arrayptr(double, 160), k: int): double = let
-  val i = idx160(k)
-in arrayptr_get_at(vals, i) end
-
-(* Returns the start of the next line and the number of values read, or ~1. *)
-fun read_nums {l:nat | l <= 65536} {j:nat | j <= l} .<l-j>.
-  (buf: !arrayptr(char, 65536), len: int(l), j: int(j), vals: !arrayptr(double, 160),
-   cnt: int, cur: double, neg: bool, inum: bool): [k:nat | k <= l] @(int(k), int) =
-  if j >= len then let
-    val c1 = commit(vals, inum, cnt, neg, cur)
-  in @(len, c1) end
+fun read_values {l:nat | l <= INPUT_CAPACITY} {j:nat | j <= l} {c:nat | c <= VALUE_CAPACITY} .<l-j>.
+  (buf: !input, len: int(l), j: int(j), vals: !values, count: int(c), magnitude: double, negative: bool, pending: bool)
+  : [k:nat | k <= l] @(int(k), tally) =
+  if j >= len then @(len, commit(vals, pending, count, negative, magnitude))
   else let
     val c = arrayptr_get_at(buf, j)
   in
-    if c = '\n' then let
-      val c1 = commit(vals, inum, cnt, neg, cur)
-    in @(j + 1, c1) end
+    if c = '\n' then @(j + 1, commit(vals, pending, count, negative, magnitude))
     else if c = ' ' then let
-      val c1 = commit(vals, inum, cnt, neg, cur)
-    in if c1 < 0 then @(len, ~1) else read_nums(buf, len, j + 1, vals, c1, 0.0, false, false) end
+      val committed = commit(vals, pending, count, negative, magnitude)
+    in
+      if committed < 0 then @(len, ~1) else read_values(buf, len, j + 1, vals, committed, 0.0, false, false)
+    end
     else if c = '-' then
-      (if inum then @(len, ~1) else read_nums(buf, len, j + 1, vals, cnt, 0.0, true, false))
-    else if c >= '0' andalso c <= '9' then
-      read_nums(buf, len, j + 1, vals, cnt,
-        cur * 10.0 + g0int2float_int_double(char2int0(c) - 48), neg, true)
+      (if pending then @(len, ~1) else read_values(buf, len, j + 1, vals, count, 0.0, true, false))
+    else if is_digit(c) then read_values(buf, len, j + 1, vals, count, magnitude * 10.0 + digit_value(c), negative, true)
     else @(len, ~1)
   end
 
-(* Copies r*c scaled values, consuming them from index k on. *)
-fun fill_cols {r,c:nat} {i:nat | i < r} {j:nat | j <= c} .<c-j>.
-  (m: !matrixptr(double, r, c), c: int(c), i: int(i), j: int(j),
-   vals: !arrayptr(double, 160), k: int): void =
-  if j < c then let
-    val v = get_val(vals, k)
-    val () = matrixptr_set_at(m, i, c, j, v / 1.0e9)
-  in fill_cols(m, c, i, j + 1, vals, k + 1) end
+fun value_at (vals: !values, k: int): double = let
+  val k = g1ofg0(k)
+in
+  if k >= 0 then (if k < VALUE_CAPACITY then arrayptr_get_at(vals, k) else 0.0) else 0.0
+end
 
-fun fill_rows {r,c:nat} {i:nat | i <= r} .<r-i>.
-  (m: !matrixptr(double, r, c), r: int(r), c: int(c), i: int(i),
-   vals: !arrayptr(double, 160), k: int): void =
-  if i < r then
-    (fill_cols(m, c, i, 0, vals, k); fill_rows(m, r, c, i + 1, vals, k + c))
+fun bounded_index {n:nat} (x: double, limit: int(n)): [i:int | ~1 <= i; i < n] int(i) =
+  if x >= 0.0 andalso x < g0int2float_int_double(limit) then let
+    val i = g1ofg0(g0float2int_double_int(x))
+  in if i >= 0 then (if i < limit then i else ~1) else ~1 end
+  else ~1
 
-fun fill_vec {n:nat} {j:nat | j <= n} .<n-j>.
-  (v: !arrayptr(double, n), n: int(n), j: int(j), vals: !arrayptr(double, 160)): void =
-  if j < n then let
-    val x = get_val(vals, j)
-    val () = arrayptr_set_at(v, j, x / 1.0e9)
-  in fill_vec(v, n, j + 1, vals) end
+fun fill_row {r,c:nat} {i:nat | i < r} {j:nat | j <= c} .<c-j>.
+  (m: !matrixptr(double, r, c), c: int(c), i: int(i), j: int(j), vals: !values, k: int): void =
+  if j < c then (matrixptr_set_at(m, i, c, j, value_at(vals, k) / WIRE_SCALE); fill_row(m, c, i, j + 1, vals, k + 1))
 
-(* A single row of the step table: columns [c0, c0+w) taken from vals[1..]. *)
-fun fill_step_row {j:nat | j <= 6} {w:nat | j + w <= 6} {r:nat | r < 128} .<w>.
-  (m: !matrixptr(double, 128, 6), r: int(r), j: int(j), w: int(w),
-   vals: !arrayptr(double, 160), k: int): void =
-  if w > 0 then let
-    val v = get_val(vals, k)
-    val () = matrixptr_set_at(m, r, 6, j, v / 1.0e9)
-  in fill_step_row(m, r, j + 1, w - 1, vals, k + 1) end
+fun fill_matrix {r,c:nat} {i:nat | i <= r} .<r-i>.
+  (m: !matrixptr(double, r, c), r: int(r), c: int(c), i: int(i), vals: !values, k: int): void =
+  if i < r then (fill_row(m, c, i, 0, vals, k); fill_matrix(m, r, c, i + 1, vals, k + c))
 
-(* ---- dispatch ------------------------------------------------------------- *)
+fun fill_vector {n:nat} {j:nat | j <= n} .<n-j>. (v: !arrayptr(double, n), n: int(n), j: int(j), vals: !values): void =
+  if j < n then (arrayptr_set_at(v, j, value_at(vals, j) / WIRE_SCALE); fill_vector(v, n, j + 1, vals))
 
-fun as_index (x: double, lo: int, hi: int): int = let
-  val i = g0float2int_double_int(x)
-in if i >= lo then (if i < hi then i else ~1) else ~1 end
+fun fill_columns {first:nat} {width:nat | first + width <= 6} {r:nat | r < STEP_CAPACITY} .<width>.
+  (m: !matrixptr(double, STEP_CAPACITY, 6), r: int(r), first: int(first), width: int(width), vals: !values, k: int): void =
+  if width > 0 then
+    (matrixptr_set_at(m, r, 6, first, value_at(vals, k) / WIRE_SCALE); fill_columns(m, r, first + 1, width - 1, vals, k + 1))
 
-(* result: ~1 reject; otherwise a small record-kind code the caller ignores *)
-fun record
-  (tag: char, vals: !arrayptr(double, 160), cnt: int,
+fun apply_record
+  (tag: char, vals: !values, count: natLte(VALUE_CAPACITY),
    a: !matrixptr(double, 4, 4), b: !matrixptr(double, 4, 2), c: !matrixptr(double, 2, 4),
-   kk: !matrixptr(double, 2, 4), l: !matrixptr(double, 4, 2),
-   wv: !matrixptr(double, 128, 6), fl: !matrixptr(double, 16, 4), x0: !arrayptr(double, 4),
-   steps: int, nf: int): @(int, int, int) =
-  (* returns (status, steps, nf); status ~1 rejects *)
-  if tag = 'D' then
-    (if cnt = 4 then let
-       val n = get_val(vals, 0)
-       val m = get_val(vals, 1)
-       val p = get_val(vals, 2)
-       val s = as_index(get_val(vals, 3), 0, 129)
-     in
-       if n = 4.0e0 then
-         (if m = 2.0e0 then
-           (if p = 2.0e0 then (if s >= 0 then @(0, s, nf) else @(~1, steps, nf)) else @(~1, steps, nf))
-          else @(~1, steps, nf))
-       else @(~1, steps, nf)
-     end else @(~1, steps, nf))
-  else if tag = 'A' then
-    (if cnt = 16 then (fill_rows(a, 4, 4, 0, vals, 0); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'B' then
-    (if cnt = 8 then (fill_rows(b, 4, 2, 0, vals, 0); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'C' then
-    (if cnt = 8 then (fill_rows(c, 2, 4, 0, vals, 0); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'K' then
-    (if cnt = 8 then (fill_rows(kk, 2, 4, 0, vals, 0); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'L' then
-    (if cnt = 8 then (fill_rows(l, 4, 2, 0, vals, 0); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'X' then
-    (if cnt = 4 then (fill_vec(x0, 4, 0, vals); @(0, steps, nf)) else @(~1, steps, nf))
-  else if tag = 'W' then let
-    val r = g1ofg0(as_index(get_val(vals, 0), 0, steps))
+   k: !matrixptr(double, 2, 4), l: !matrixptr(double, 4, 2), table: !matrixptr(double, STEP_CAPACITY, 6),
+   x0: !arrayptr(double, 4), fault_steps: !arrayptr(int, FAULT_CAPACITY),
+   fault_kinds: !arrayptr(fault_kind, FAULT_CAPACITY), fault_lanes: !arrayptr(lane, FAULT_CAPACITY),
+   fault_params: !arrayptr(double, FAULT_CAPACITY), steps: step_count, faults: fault_count)
+  : @(bool, step_count, fault_count) =
+  if tag = 'D' then let
+    val n = value_at(vals, 0)
+    val m = value_at(vals, 1)
+    val p = value_at(vals, 2)
+    val declared = bounded_index(value_at(vals, 3), STEP_CAPACITY + 1)
   in
-    if cnt = 5 then
-      (if r >= 0 then (if r < 128 then (fill_step_row(wv, r, 0, 4, vals, 1); @(0, steps, nf))
-                       else @(~1, steps, nf)) else @(~1, steps, nf))
-    else @(~1, steps, nf)
+    if declared < 0 then @(false, steps, faults)
+    else if count = 4 andalso n = 4.0 andalso m = 2.0 andalso p = 2.0 then @(true, declared, faults)
+    else @(false, steps, faults)
   end
-  else if tag = 'V' then let
-    val r = g1ofg0(as_index(get_val(vals, 0), 0, steps))
-  in
-    if cnt = 3 then
-      (if r >= 0 then (if r < 128 then (fill_step_row(wv, r, 4, 2, vals, 1); @(0, steps, nf))
-                       else @(~1, steps, nf)) else @(~1, steps, nf))
-    else @(~1, steps, nf)
+  else if tag = 'A' then (if count = 16 then (fill_matrix(a, 4, 4, 0, vals, 0); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'B' then (if count = 8 then (fill_matrix(b, 4, 2, 0, vals, 0); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'C' then (if count = 8 then (fill_matrix(c, 2, 4, 0, vals, 0); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'K' then (if count = 8 then (fill_matrix(k, 2, 4, 0, vals, 0); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'L' then (if count = 8 then (fill_matrix(l, 4, 2, 0, vals, 0); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'X' then (if count = 4 then (fill_vector(x0, 4, 0, vals); @(true, steps, faults)) else @(false, steps, faults))
+  else if tag = 'W' then let val r = bounded_index(value_at(vals, 0), steps) in
+    if count = 5 then (if r >= 0 then (fill_columns(table, r, 0, 4, vals, 1); @(true, steps, faults)) else @(false, steps, faults))
+    else @(false, steps, faults)
+  end
+  else if tag = 'V' then let val r = bounded_index(value_at(vals, 0), steps) in
+    if count = 3 then (if r >= 0 then (fill_columns(table, r, 4, 2, vals, 1); @(true, steps, faults)) else @(false, steps, faults))
+    else @(false, steps, faults)
   end
   else if tag = 'F' then let
-    val row = g1ofg0(nf)
-    val kind = as_index(get_val(vals, 1), 0, 10)
-    val chan = as_index(get_val(vals, 2), 0, 2)
+    val step = bounded_index(value_at(vals, 0), steps)
+    val kind = bounded_index(value_at(vals, 1), 10)
+    val lane = bounded_index(value_at(vals, 2), 2)
+    val param = value_at(vals, 3) / WIRE_SCALE
   in
-    if cnt = 4 then
-      (if row >= 0 then
-         (if row < 16 then
-            (if kind >= 0 then
-               (if chan >= 0 then let
-                  val s = get_val(vals, 0)
-                  val k1 = get_val(vals, 1)
-                  val c1 = get_val(vals, 2)
-                  val p1 = get_val(vals, 3)
-                  val () = matrixptr_set_at(fl, row, 4, 0, s)
-                  val () = matrixptr_set_at(fl, row, 4, 1, k1)
-                  val () = matrixptr_set_at(fl, row, 4, 2, c1)
-                  val () = matrixptr_set_at(fl, row, 4, 3, p1 / 1.0e9)
-                in @(0, steps, nf + 1) end
-                else @(~1, steps, nf))
-             else @(~1, steps, nf))
-          else @(~1, steps, nf))
-       else @(~1, steps, nf))
-    else @(~1, steps, nf)
+    if faults >= FAULT_CAPACITY then @(false, steps, faults)
+    else if kind < 0 then @(false, steps, faults)
+    else if lane < 0 then @(false, steps, faults)
+    else if count = 4 andalso step >= 0 then let
+      val () = arrayptr_set_at(fault_steps, faults, step)
+      val () = arrayptr_set_at<fault_kind>(fault_kinds, faults, kind)
+      val () = arrayptr_set_at<lane>(fault_lanes, faults, lane)
+      val () = arrayptr_set_at(fault_params, faults, param)
+    in @(true, steps, faults + 1) end
+    else @(false, steps, faults)
   end
-  else @(0, steps, nf)   (* # comments and the expected M H G E T lines are not consumed here *)
+  else @(true, steps, faults)
 
-fun skip_line {l:nat | l <= 65536} {i:nat | i <= l} .<l-i>.
-  (buf: !arrayptr(char, 65536), len: int(l), i: int(i)): [k:nat | k <= l] int(k) =
-  if i < len then
-    (if arrayptr_get_at(buf, i) = '\n' then i + 1 else skip_line(buf, len, i + 1))
-  else len
+fun record (tag: char, vals: !values, count: natLte(VALUE_CAPACITY), cfg: !cfg_vt): bool = let
+  val @CFG(a, b, c, k, l, table, x0, fault_steps, fault_kinds, fault_lanes, fault_params, steps, faults) = cfg
+  val @(accepted, next_steps, next_faults) =
+    apply_record(tag, vals, count, a, b, c, k, l, table, x0, fault_steps, fault_kinds, fault_lanes, fault_params, steps, faults)
+  val () = steps := next_steps
+  val () = faults := next_faults
+  prval () = fold@(cfg)
+in accepted end
 
-fun parse_all {l:nat | l <= 65536} {i:nat | i <= l} .<l-i>.
-  (buf: !arrayptr(char, 65536), len: int(l), i: int(i), vals: !arrayptr(double, 160),
-   a: !matrixptr(double, 4, 4), b: !matrixptr(double, 4, 2), c: !matrixptr(double, 2, 4),
-   kk: !matrixptr(double, 2, 4), l2: !matrixptr(double, 4, 2),
-   wv: !matrixptr(double, 128, 6), fl: !matrixptr(double, 16, 4), x0: !arrayptr(double, 4),
-   steps: int, nf: int): @(int, int, int) =
-  if i >= len then @(0, steps, nf)
+fun skip_line {l:nat | l <= INPUT_CAPACITY} {i:nat | i <= l} .<l-i>. (buf: !input, len: int(l), i: int(i)): [k:nat | k <= l] int(k) =
+  if i < len then (if arrayptr_get_at(buf, i) = '\n' then i + 1 else skip_line(buf, len, i + 1)) else len
+
+fun parse_all {l:nat | l <= INPUT_CAPACITY} {i:nat | i <= l} .<l-i>.
+  (buf: !input, len: int(l), i: int(i), vals: !values, cfg: !cfg_vt): bool =
+  if i >= len then true
   else let
     val tag = arrayptr_get_at(buf, i)
-    val skipped = skip_line(buf, len, i)
   in
-    if tag = '#' then
-      (if skipped > i then parse_all(buf, len, skipped, vals, a, b, c, kk, l2, wv, fl, x0, steps, nf)
-       else @(~1, steps, nf))
+    if tag = '#' then let val next = skip_line(buf, len, i) in if next > i then parse_all(buf, len, next, vals, cfg) else false end
     else let
-    val @(next, cnt) = read_nums(buf, len, i + 1, vals, 0, 0.0, false, false)
-  in
-    if cnt < 0 then @(~1, steps, nf)
-    else let
-      val @(st, steps1, nf1) = record(tag, vals, cnt, a, b, c, kk, l2, wv, fl, x0, steps, nf)
+      val @(next, count) = read_values(buf, len, i + 1, vals, 0, 0.0, false, false)
     in
-      if st < 0 then @(~1, steps, nf)
-      else if next > i then parse_all(buf, len, next, vals, a, b, c, kk, l2, wv, fl, x0, steps1, nf1)
-      else @(~1, steps, nf)
-    end
+      if count < 0 then false
+      else if next <= i then false
+      else record(tag, vals, count, cfg) andalso parse_all(buf, len, next, vals, cfg)
     end
   end
 
-(* ---- entry ---------------------------------------------------------------- *)
+fun reject (reason: string): bool = (println! ("REJECT ", reason); false)
 
-fun reject (reason: string): void = println! ("REJECT ", reason)
+fun ingest (path: string, buf: !input, vals: !values, cfg: !cfg_vt): bool = let
+  val size = g1ofg0(read_file(path, buf, INPUT_CAPACITY))
+in
+  if size = ~2 then reject("fixture exceeds the 65536 byte input capacity")
+  else if size < 0 then reject("unreadable fixture")
+  else if size > INPUT_CAPACITY then reject("fixture exceeds the 65536 byte input capacity")
+  else case+ verify(buf, size, 0, FNV_OFFSET) of
+    | UNSEALED() => reject("missing Z checksum line")
+    | TAMPERED() => reject("checksum mismatch")
+    | SEALED() => parse_all(buf, size, 0, vals, cfg) orelse reject("malformed or out-of-shape record")
+end
+
+fun cfg_make (): cfg_vt =
+  CFG(mat_zero(4, 4), mat_zero(4, 2), mat_zero(2, 4), mat_zero(2, 4), mat_zero(4, 2),
+      mat_zero(STEP_CAPACITY, 6), arrayptr_make_elt<double>(i2sz(4), 0.0),
+      arrayptr_make_elt<int>(i2sz(FAULT_CAPACITY), 0), arrayptr_make_elt<fault_kind>(i2sz(FAULT_CAPACITY), 0),
+      arrayptr_make_elt<lane>(i2sz(FAULT_CAPACITY), 0), arrayptr_make_elt<double>(i2sz(FAULT_CAPACITY), 0.0),
+      0, 0)
+where {
+  fun mat_zero {r,c:nat} (r: int(r), c: int(c)): matrixptr(double, r, c) = matrixptr_make_elt<double>(i2sz(r), i2sz(c), 0.0)
+}
 
 implement cfg_free (cfg) = let
-  val ~CFG(a, b, c, k, l, wv, fl, x0, _, _) = cfg
+  val ~CFG(a, b, c, k, l, table, x0, fault_steps, fault_kinds, fault_lanes, fault_params, _, _) = cfg
 in
-  matrixptr_free(a); matrixptr_free(b); matrixptr_free(c); matrixptr_free(k);
-  matrixptr_free(l); matrixptr_free(wv); matrixptr_free(fl); arrayptr_free(x0)
+  matrixptr_free(a); matrixptr_free(b); matrixptr_free(c); matrixptr_free(k); matrixptr_free(l);
+  matrixptr_free(table); arrayptr_free(x0);
+  arrayptr_free(fault_steps); arrayptr_free(fault_kinds); arrayptr_free(fault_lanes); arrayptr_free(fault_params)
 end
 
-fun stage (path: string, buf: !arrayptr(char, 65536), vals: !arrayptr(double, 160),
-           a: !matrixptr(double, 4, 4), b: !matrixptr(double, 4, 2), c: !matrixptr(double, 2, 4),
-           k: !matrixptr(double, 2, 4), l: !matrixptr(double, 4, 2),
-           wv: !matrixptr(double, 128, 6), fl: !matrixptr(double, 16, 4), x0: !arrayptr(double, 4))
-  : @(int, int, int) = let
-  val n = read_file(path, buf, 65536)
-  val len = g1ofg0(n)
-in
-  if n = ~1 then (reject("unreadable fixture"); @(~1, 0, 0))
-  else if n = ~2 then (reject("fixture exceeds the 65536 byte input capacity"); @(~1, 0, 0))
-  else if len >= 0 then
-    (if len <= 65536 then let
-       val v = verify(buf, len, 0, 0x811C9DC5u)
-     in
-       if v < 0 then (reject("missing Z checksum line"); @(~1, 0, 0))
-       else if v = 0 then (reject("checksum mismatch"); @(~1, 0, 0))
-       else let
-         val r = parse_all(buf, len, 0, vals, a, b, c, k, l, wv, fl, x0, 0, 0)
-       in
-         (if r.0 < 0 then reject("malformed or out-of-shape record"); r)
-       end
-     end else (reject("fixture exceeds the 65536 byte input capacity"); @(~1, 0, 0)))
-  else (reject("unreadable fixture"); @(~1, 0, 0))
-end
+implement cfg_steps (cfg) = let
+  val @CFG(_, _, _, _, _, _, _, _, _, _, _, steps, _) = cfg
+  val declared = steps
+  prval () = fold@(cfg)
+in declared end
 
 implement load_fixture (path) = let
-  val buf = arrayptr_make_elt<char>(i2sz(65536), '\000')
-  val vals = arrayptr_make_elt<double>(i2sz(160), 0.0)
-  val a = matrixptr_make_elt<double>(i2sz(4), i2sz(4), 0.0)
-  val b = matrixptr_make_elt<double>(i2sz(4), i2sz(2), 0.0)
-  val c = matrixptr_make_elt<double>(i2sz(2), i2sz(4), 0.0)
-  val k = matrixptr_make_elt<double>(i2sz(2), i2sz(4), 0.0)
-  val l = matrixptr_make_elt<double>(i2sz(4), i2sz(2), 0.0)
-  val wv = matrixptr_make_elt<double>(i2sz(128), i2sz(6), 0.0)
-  val fl = matrixptr_make_elt<double>(i2sz(16), i2sz(4), 0.0)
-  val x0 = arrayptr_make_elt<double>(i2sz(4), 0.0)
-  val @(st, steps, nf) = stage(path, buf, vals, a, b, c, k, l, wv, fl, x0)
-  val () = arrayptr_free(buf)
-  val () = arrayptr_free(vals)
+  val buf = arrayptr_make_elt<char>(i2sz(INPUT_CAPACITY), '\000')
+  val vals = arrayptr_make_elt<double>(i2sz(VALUE_CAPACITY), 0.0)
+  val cfg = cfg_make()
+  val ingested = ingest(path, buf, vals, cfg)
+  val () = (arrayptr_free(buf); arrayptr_free(vals))
 in
-  if st < 0 then let
-    val () = (matrixptr_free(a); matrixptr_free(b); matrixptr_free(c); matrixptr_free(k))
-    val () = (matrixptr_free(l); matrixptr_free(wv); matrixptr_free(fl); arrayptr_free(x0))
-  in None_vt() end
-  else Some_vt(CFG(a, b, c, k, l, wv, fl, x0, steps, nf))
+  if ingested then Some_vt(cfg) else (cfg_free(cfg); None_vt())
 end

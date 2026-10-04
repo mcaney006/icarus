@@ -27,8 +27,6 @@ implement ring_len {cap} (r) = let
   prval () = fold@(r)
 in l end
 
-(* Ages are measured back from the newest write. Both index expressions are linear
-   in head, cap and age, so the solver proves them in range without a modulus. *)
 implement ring_peek {cap} (r, cap, age) = let
   val @RING(buf, head, len) = r
   val h = head

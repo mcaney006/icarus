@@ -102,8 +102,10 @@ parseFixture content = do
   noise <- series p "V"
   faults <- traverse (fault p . snd) (filter ((== "F") . fst) rs)
   if length disturbance /= steps || length noise /= steps
-     then Left "step count disagrees with W/V records"
-     else Right (n ** m ** p ** MkFixture plant x0 steps disturbance noise faults)
+    then Left "step count disagrees with W/V records"
+    else if any ((>= steps) . (.step)) faults
+      then Left "fault step lies outside the run"
+      else Right (n ** m ** p ** MkFixture plant x0 steps disturbance noise faults)
 
 export
 simulate : {n, m, p : Nat} -> Fixture n m p -> (Sim n m p, List Frame)

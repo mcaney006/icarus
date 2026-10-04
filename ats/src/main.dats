@@ -2,7 +2,6 @@
 staload "./fixture.sats"
 staload "./sim.sats"
 
-(* Exit codes: 0 ok, 2 usage, 3 fixture rejected, 4 the frame loop allocated. *)
 implement main0 (argc, argv) =
   if argc >= 2 then let
     val opt = load_fixture(argv[1])

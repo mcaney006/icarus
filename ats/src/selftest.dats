@@ -34,8 +34,7 @@ fun push_n {k:nat} .<k>. (r: !ring_vt(4), k: int(k), v: int): void =
   if k > 0 then (ring_push(r, 4, v); push_n(r, k - 1, v + 1))
 
 implement main0 () = let
-  (* ---- matrix library ------------------------------------------------ *)
-  val a = mat_make(2, 3)
+    val a = mat_make(2, 3)
   val () = (matrixptr_set_at(a, 0, 3, 0, 1.0); matrixptr_set_at(a, 0, 3, 1, 2.0); matrixptr_set_at(a, 0, 3, 2, 3.0))
   val () = (matrixptr_set_at(a, 1, 3, 0, 4.0); matrixptr_set_at(a, 1, 3, 1, 5.0); matrixptr_set_at(a, 1, 3, 2, 6.0))
   val b = mat_make(3, 2)
@@ -102,16 +101,14 @@ implement main0 () = let
   val () = (matrixptr_free(at); matrixptr_free(att))
   val () = (arrayptr_free(v); arrayptr_free(mv); arrayptr_free(u); arrayptr_free(u2); arrayptr_free(s))
 
-  (* ---- pool: leases are linear and the cycle never allocates ---------- *)
-  val p = pool_make(3)
+    val p = pool_make(3)
   val before = alloc_calls()
   val p = lease_cycle(p, 1000)
   val after = alloc_calls()
   val () = check("pool: 1000 take/give cycles allocate nothing", before = after)
   val () = pool_free(p)
 
-  (* ---- ring ----------------------------------------------------------- *)
-  val r = ring_make(4)
+    val r = ring_make(4)
   val () = check("ring: empty has length 0", ring_len(r) = 0)
   val () = check("ring: empty refuses reads", ring_peek(r, 4, 0) = ~1)
   val () = push_n(r, 6, 4)
@@ -123,8 +120,7 @@ implement main0 () = let
   val () = check("ring: negative age refused", ring_peek(r, 4, ~1) = ~1)
   val () = ring_free(r)
 
-  (* ---- modes ---------------------------------------------------------- *)
-  val (_ | a1) = decide_mode(3, 0, false, 0, 0)
+    val (_ | a1) = decide_mode(3, 0, false, 0, 0)
   val () = check("mode: Ready engages", a1 = 4)
   val (_ | a2) = decide_mode(4, 3, false, 0, 0)
   val () = check("mode: Running + Unsafe -> Safe", a2 = 6)

@@ -104,6 +104,8 @@ All Lean statements are over `Int` (A3).
 | Each frame buffer lease is returned exactly once; an empty pool cannot be taken from; pools are freed only when full | `pool_vt(n, avail)` (pool.sats) | type-enforced | A2 (trusted pool kernel) | `negative/ats/lease_leak.dats`, `lease_double_release.dats`, `empty_pool_take.dats`; self-test "pool: 1000 take/give cycles allocate nothing" |
 | Ring write index < capacity and length ≤ capacity | `ring_` datavtype indices (ring.dats) | type-enforced | — | ring self-tests |
 | The frame loop makes no allocator call | `run_sim` compares allocator counts (`main.dats` exits 4) | runtime-checked | A2 (counting allocator) | every `icarus_sim` run; benchmark rows (0 calls) |
+| Every recursive function terminates | `.<…>.` termination metrics on all recursive ATS functions | type-enforced | — | — |
+| Fault kinds, lanes, step and fault counts carry static bounds after load, so the frame loop indexes without runtime checks | `fault_kind`, `lane`, `step_count`, `fault_count` (fixture.sats); `do_frame {k:nat \| k < STEP_CAPACITY}` | type-enforced | A13 | crosscheck (all fixtures) |
 | A fixture of any shape other than 4/2/2, or with a bad checksum, is rejected | `load_fixture` (fixture.dats) | runtime-checked | A13 | crosscheck corruption variants |
 
 ## Cross-language: tested, not proved
@@ -129,6 +131,4 @@ These are stated so nobody infers them from the tables above.
   proved.
 - **Stage work fits stage budgets.** The abstract cost model shows that it does
   not for Acquire and Estimate (docs/results/cost_model.md).
-- **Termination of every ATS function.** Functions with a `.<…>.` metric are
-  checked. Unmetricated ones (the benchmark loops, `sim_bench`) are not.
 - **The trusted base.** Pool kernel, C shims, drivers and IO wrappers (A2).

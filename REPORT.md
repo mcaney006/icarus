@@ -114,10 +114,13 @@ Where the types were weaker than intended:
   heterogeneous structure the matrices do not support. Unit safety is
   demonstrated by `Dim`, its self-tests and the negative test. It does not run
   through the simulation.
-- **ATS bounds are clamped, not proved.** Index arithmetic in the frame loop
-  uses clamping helpers (`idx2`, `idx16`, `idx128`). These make every access
-  provably in range by mapping out-of-range values to 0. That removes the out-of-bounds read but
-  could hide a logic error that a proof of the true bound would have exposed.
+- **ATS checks bounds only at load time.** The fixture reader validates every
+  fault record once and stores kinds and lanes as bounded types (`natLt(10)`,
+  `natLt(2)`), with step and fault counts as `natLte(128)` and `natLte(16)`.
+  After that, every index in the frame loop is proved in range statically and
+  no runtime clamp remains. The reader's own buffer accesses still go through
+  an explicit range check, because their offsets are products the ATS
+  constraint solver cannot reason about.
 - **ATS ring reads.** `ring_peek` takes a plain `int` age and refuses
   out-of-range ages at run time (returns −1), where Idris, F\* and the Lean model
   require a proof. The in-range index arithmetic inside it is checked statically.
@@ -372,8 +375,6 @@ differ. The numbers say nothing about the languages in general.
   masking is proved.
 - **Execution time.** The cost model counts abstract operations and predicts
   nothing about real hardware.
-- **Termination of every ATS function.** Only functions with a termination
-  metric are checked. The benchmark loops and `sim_bench` have none.
 - **The trusted base.** The ATS pool kernel, the C shims, the OCaml drivers,
   the Idris and Lean IO wrappers, the toolchains themselves, and the Python
   oracle (A1, A2).

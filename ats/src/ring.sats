@@ -1,7 +1,3 @@
-(* Fixed-capacity history of ints. The write index and occupied length carry
-   their bounds in their types (head < cap, len <= cap), so neither can leave
-   range, and a read refuses ages beyond what has been written. *)
-
 absvtype ring_vt(cap:int) = ptr
 
 fun ring_make {cap:pos} (cap: int(cap)): ring_vt(cap)

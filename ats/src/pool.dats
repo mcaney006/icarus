@@ -3,9 +3,6 @@
 staload UN = "prelude/SATS/unsafe.sats"
 staload "./pool.sats"
 
-(* Trusted kernel: the pool is a raw pointer that is the buffer while one slot is
-   free and null while it is leased. The availability index is enforced entirely
-   by the signatures in pool.sats; these four bodies are the only unsafe casts. *)
 assume pool_vt(n, avail) = ptr
 
 implement pool_make {n} (n) =

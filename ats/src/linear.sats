@@ -1,7 +1,3 @@
-(* Fixed-dimension linear algebra over linear, heap-owned storage. Dimensions are
-   static indices on every type, so a product with mismatched inner dimensions is
-   a type error. No function allocates; callers supply the output. *)
-
 fun vec_make {n:nat} (n: int(n)): arrayptr(double, n)
 fun mat_make {r,c:nat} (r: int(r), c: int(c)): matrixptr(double, r, c)
 

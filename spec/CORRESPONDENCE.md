@@ -33,11 +33,11 @@ The only data that crosses a language boundary is the ICF 2 file format
 | Control u = sat(−K x̂) | `Controller.control` | `clampAll` in `frame` | `Sat.clamp` (fixed-point word) | `clamp_all` | `A.clamp` |
 | Mode | `Modes.Mode` | `Types.Mode` | `Icarus.Mode.mode` | static int 0–7 | `Mode` enum |
 | Legal transition | `Modes.legal` (Bool) | `Legal m m'` (type family) | `legal` (bool, in `decide`'s return type) | `dataprop LEGAL(m, m1)` | `LEGAL` table |
-| Fault kind | `Faults.FaultKind` | `Types.FaultKind` (codes derived by `Codes.enumeration`) | — (sees flags only) | int code from the fixture | `Fault` enum |
+| Fault kind | `Faults.FaultKind` | `Types.FaultKind` (codes derived by `Codes.enumeration`) | — (sees flags only) | `fault_kind` = `natLt(10)`, validated at load | `Fault` enum |
 | Health | `Faults.Health` | `Types.Health` | `Icarus.Health.health` | int 0–3 | `Health` enum |
 | Fault flags | `Faults.Flags` | `Plant.Flags` | `Icarus.Health.flags` | bit mask int | `set` of names |
 | Classification | `Faults.classify` | `Plant.classify` | `Icarus.Health.classify` | `classify` (mode.dats) | Health block |
-| Decision state | `Decision.Monitor` | `Plant.Monitor` | `Icarus.Mode.st` | `ctl` array in `st_vt` | locals `mode`, `healthy_streak`, `degraded_bad` |
+| Decision state | `Decision.Monitor` | `Plant.Monitor` | `Icarus.Mode.st` | `mode`, `healthy`, `bad` fields of `st_vt` | locals `mode`, `healthy_streak`, `degraded_bad` |
 | Decision function | `Monitor.next` | `Plant.next` (via `decideMode`) | `Icarus.Mode.decide` | `decide_mode` | Decide block |
 | Three-channel vote | — | `Plant.median3` | `Icarus.Vote.med` (over `int`) | `median3` | `median3` |
 | History buffer | `Ring α cap` (newest-first list model) | `Ring (S c) a` | `ring a cap` | `ring_vt(cap)` | — |
@@ -60,8 +60,8 @@ cross-check fails if a copy drifts in a way the fixtures exercise.
 | Control limit (Degraded) | 0.5 | `DEGRADED_CTRL` | `degradedCtrl` | — | — | `DEGRADED_CTRL` |
 | Recovery frames | 3 | `RECOVERY_FRAMES` | `recoveryFrames` | `recovery_frames` | `recoveryFrames` | literal in `decide_mode` |
 | Degraded limit | 3 | `DEGRADED_LIMIT` | `degradedLimit` | `degraded_limit` | `degradedLimit` | literal in `decide_mode` |
-| Frame budget | 1000 ticks | `FRAME_BUDGET` | `frameBudget` | `frame_budget` | `frameBudget` | literal |
-| Stage budgets | 120/80/220/180/160/90/50 | `STAGE_BUDGET` | `stageSum` = 900 | `budget` | `stageBudgets` | literal 900 |
+| Frame budget | 1000 ticks | `FRAME_BUDGET` | `frameBudget` | `frame_budget` | `frameBudget` | `FRAME_BUDGET` |
+| Stage budgets | 120/80/220/180/160/90/50 | `STAGE_BUDGET` | `stageSum` = 900 | `budget` | `stageBudgets` | `NOMINAL_FRAME_COST` |
 | Fixed-point scale | 65536 | `FixedArith.SCALE` | — | `Sat.scale` | — | — |
 
 ## How each correspondence is checked
