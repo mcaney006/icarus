@@ -1,3 +1,3 @@
 import Icarus.Ring
-open Icarus.Ring
-example : Nat := get (push (empty : Ring Nat 4) 7) 0 (by decide)
+open Icarus
+example : Nat := ((Ring.empty : Ring Nat 4).push 7).get 0 (by decide)

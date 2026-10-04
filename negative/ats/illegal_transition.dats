@@ -1,5 +1,3 @@
-(* EXPECT: unsolved constraint|mismatch|cannot be assigned *)
-(* Safe (6) to Running (4) has no LEGAL constructor: Degraded to Running is 5 to 4. *)
 #include "share/atspre_staload.hats"
 staload "./mode.sats"
 

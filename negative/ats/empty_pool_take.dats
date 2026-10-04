@@ -1,6 +1,3 @@
-(* EXPECT: unsolved constraint|mismatch|cannot be assigned *)
-(* The pool owns one buffer; a second take with the first lease outstanding has
-   no pool_vt(n, 1) to consume. *)
 #include "share/atspre_staload.hats"
 staload "./pool.sats"
 

@@ -1,69 +1,52 @@
-/-
-Executable driver for the proved decision layer: read an ICF fixture, verify its
-FNV-1a checksum, run `Icarus.decide` from Ready over the recorded flag masks, and
-print the canonical M and H lines (spec/ICF.md). The mode and health logic is the
-function the theorems in Icarus/Decision.lean are about; only the string handling
-here is outside the proofs.
--/
 import Icarus.Decision
+
 open Icarus
 
-def fnvStep (h : UInt32) (c : Char) : UInt32 := (h ^^^ c.toNat.toUInt32) * 16777619
+def fnvOffset : UInt32 := 2166136261
+def fnvPrime : UInt32 := 16777619
 
-def fnvLine (h : UInt32) (line : String) : UInt32 := fnvStep (line.foldl fnvStep h) '\n'
+def fnv (hash : UInt32) (c : Char) : UInt32 := (hash ^^^ c.toNat.toUInt32) * fnvPrime
 
-def modeCode : Mode → Nat
-  | .boot => 0 | .selfTest => 1 | .calibrating => 2 | .ready => 3
-  | .running => 4 | .degraded => 5 | .safe => 6 | .fault => 7
-
-def healthCode (h : Health) : Nat := h.rank
+def fnvLine (hash : UInt32) (line : String) : UInt32 := fnv (line.foldl fnv hash) '\n'
 
 structure Scan where
-  hash : UInt32
-  masks : Option (List Int)
-  checked : Option Bool
+  hash : UInt32 := fnvOffset
+  masks : Option (List Int) := none
+  sealed : Option Bool := none
 
-def words (line : String) : List String := (line.splitOn " ").filter (· ≠ "")
+def Scan.feed (scan : Scan) (line : String) : Scan :=
+  match line.splitOn " " |>.filter (· ≠ "") with
+  | ["Z", digest] => { scan with sealed := some (digest.toNat? == some scan.hash.toNat) }
+  | "G" :: masks => { scan with hash := fnvLine scan.hash line, masks := masks.mapM String.toInt? }
+  | _ => { scan with hash := fnvLine scan.hash line }
 
-def scanLine (acc : Scan) (line : String) : Scan :=
-  match words line with
-  | ["Z", v] => { acc with checked := some (v.toInt? == some (Int.ofNat acc.hash.toNat)) }
-  | "G" :: rest => { acc with hash := fnvLine acc.hash line, masks := rest.mapM String.toInt? }
-  | _ => { acc with hash := fnvLine acc.hash line }
+def render (tag : String) (codes : List Nat) : String :=
+  " ".intercalate (tag :: codes.map toString)
 
-def simulate (masks : List Nat) : List Nat × List Nat :=
-  let rec go (s : Monitor) : List Nat → List Nat → List Nat → List Nat × List Nat
-    | [], ms, hs => ((modeCode s.mode :: ms).reverse, hs.reverse)
-    | m :: rest, ms, hs =>
-      let f := ofMask m
-      let h := classify f
-      go (decide s h f.timing) rest (modeCode s.mode :: ms) (healthCode h :: hs)
-  go initial masks [] []
+def replay (masks : List Nat) : List Nat × List Nat :=
+  let flags := masks.map ofMask
+  let modes := flags.scanl (fun s f => s.next (classify f) f.timing) Monitor.initial
+  (modes.map (·.mode.ctorIdx), flags.map (classify · |>.ctorIdx))
 
-def render (tag : String) (xs : List Nat) : String :=
-  tag ++ " " ++ " ".intercalate (xs.map toString)
-
-def reject (why : String) : IO UInt32 := do
-  IO.println s!"REJECT {why}"
-  pure 3
+def reject (reason : String) : IO UInt32 := do
+  IO.println s!"REJECT {reason}"
+  return 3
 
 def run (path : String) : IO UInt32 := do
-  let content ← try IO.FS.readFile path catch _ => return (← reject "unreadable fixture")
-  let lines := (content.splitOn "\n").filter (· ≠ "")
-  let r := lines.foldl scanLine { hash := 2166136261, masks := none, checked := none }
-  match r.checked, r.masks with
-  | some true, some ms =>
-    if ms.any (fun m => m < 0 || m ≥ 32) then reject "flag mask out of range"
-    else
-      let (modes, healths) := simulate (ms.map Int.toNat)
-      IO.println (render "M" modes)
-      IO.println (render "H" healths)
-      pure 0
-  | some false, _ => reject "checksum mismatch"
+  let some content ← (some <$> IO.FS.readFile path).catchExceptions fun _ => pure none
+    | reject "unreadable fixture"
+  let scan := (content.splitOn "\n").filter (· ≠ "") |>.foldl Scan.feed {}
+  match scan.sealed, scan.masks with
   | none, _ => reject "missing Z checksum line"
-  | _, none => reject "missing or malformed G record"
+  | some false, _ => reject "checksum mismatch"
+  | some true, none => reject "missing or malformed G record"
+  | some true, some masks =>
+    if masks.any (fun m => m < 0 || 32 ≤ m) then reject "flag mask out of range" else
+    let (modes, healths) := replay (masks.map Int.toNat)
+    IO.println (render "M" modes)
+    IO.println (render "H" healths)
+    return 0
 
-def main (args : List String) : IO UInt32 :=
-  match args with
+def main : List String → IO UInt32
   | [path] => run path
-  | _ => do IO.eprintln "usage: icarus <fixture.icf>"; pure 2
+  | _ => do IO.eprintln "usage: icarus <fixture.icf>"; return 2

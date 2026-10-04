@@ -1,5 +1,3 @@
-(* EXPECT: unsolved constraint|mismatch|cannot be resolved *)
-(* Multiplying a 4x3 matrix by a 2x4 matrix: the inner dimensions 3 and 2 differ. *)
 #include "share/atspre_staload.hats"
 staload "./linear.sats"
 

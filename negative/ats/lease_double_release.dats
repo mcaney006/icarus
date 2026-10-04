@@ -1,5 +1,3 @@
-(* EXPECT: no longer available|linear|cannot be assigned *)
-(* Handing the same lease back twice duplicates a linear resource. *)
 #include "share/atspre_staload.hats"
 staload "./pool.sats"
 

@@ -1,9 +1,3 @@
-/-
-Fault model and health classification. Faults are typed values, never strings.
-`Flags` is the five-source summary the health monitor consumes; `Health` is its
-deterministic classification. Mirrors reference/icarus_ref.py and
-fstar/src/Icarus.Health.fst.
--/
 set_option autoImplicit false
 
 namespace Icarus
@@ -26,49 +20,47 @@ structure Flags where
   numeric : Bool
 deriving DecidableEq, Repr
 
-def b2n (b : Bool) : Nat := if b then 1 else 0
+namespace Flags
 
-def Flags.count (f : Flags) : Nat :=
-  b2n f.meas + b2n f.est + b2n f.timing + b2n f.ctrlSat + b2n f.numeric
+def none : Flags := ⟨false, false, false, false, false⟩
+
+def bits (f : Flags) : List Bool := [f.meas, f.est, f.timing, f.ctrlSat, f.numeric]
+
+def count (f : Flags) : Nat := f.bits.count true
+
+def mask (f : Flags) : Nat := f.bits.foldr (fun b acc => b.toNat + 2 * acc) 0
+
+def ofMask (m : Nat) : Flags := ⟨m.testBit 0, m.testBit 1, m.testBit 2, m.testBit 3, m.testBit 4⟩
+
+def le (f g : Flags) : Prop := ∀ p ∈ f.bits.zip g.bits, p.1 → p.2
+
+end Flags
+
+export Flags (ofMask)
 
 def classify (f : Flags) : Health :=
-  if f.numeric then Health.unsafe_
-  else if 2 ≤ f.count then Health.degraded
-  else if f.count = 1 then Health.suspect
-  else Health.healthy
+  if f.numeric then .unsafe_ else if 2 ≤ f.count then .degraded else if f.count = 1 then .suspect else .healthy
 
-def Health.rank : Health → Nat
-  | .healthy => 0 | .suspect => 1 | .degraded => 2 | .unsafe_ => 3
-
-/-- Wire encoding shared with the ICF fixtures: meas 1, est 2, timing 4, ctrl 8, numeric 16. -/
-def Flags.mask (f : Flags) : Nat :=
-  b2n f.meas + 2 * b2n f.est + 4 * b2n f.timing + 8 * b2n f.ctrlSat + 16 * b2n f.numeric
-
-def ofMask (m : Nat) : Flags :=
-  { meas := m % 2 == 1, est := m / 2 % 2 == 1, timing := m / 4 % 2 == 1
-    ctrlSat := m / 8 % 2 == 1, numeric := m / 16 % 2 == 1 }
-
-theorem numeric_dominates (f : Flags) (h : f.numeric = true) : classify f = Health.unsafe_ := by
+theorem numeric_dominates (f : Flags) (h : f.numeric) : classify f = .unsafe_ := by
   simp [classify, h]
 
-theorem no_flags_healthy : classify ⟨false, false, false, false, false⟩ = Health.healthy := by decide
+theorem no_flags_healthy : classify Flags.none = .healthy := rfl
 
-/-- Raising a flag never lowers the reported health. -/
-def Flags.le (f g : Flags) : Prop :=
-  (f.meas = true → g.meas = true) ∧ (f.est = true → g.est = true) ∧
-  (f.timing = true → g.timing = true) ∧ (f.ctrlSat = true → g.ctrlSat = true) ∧
-  (f.numeric = true → g.numeric = true)
+theorem count_le : ∀ (xs ys : List Bool), xs.length = ys.length →
+    (∀ p ∈ xs.zip ys, p.1 → p.2) → xs.count true ≤ ys.count true
+  | [], [], _, _ => Nat.le_refl 0
+  | x :: xs, y :: ys, hl, h => by
+    have tail := count_le xs ys (by simpa using hl) fun p hp => h p (List.mem_cons_of_mem _ hp)
+    have head := h (x, y) List.mem_cons_self
+    cases x <;> cases y <;> simp_all <;> try omega
 
-theorem classify_monotone (f g : Flags) (h : f.le g) :
-    (classify f).rank ≤ (classify g).rank := by
-  obtain ⟨a, b, c, d, e⟩ := h
-  rcases f with ⟨f1, f2, f3, f4, f5⟩
-  rcases g with ⟨g1, g2, g3, g4, g5⟩
-  cases f1 <;> cases f2 <;> cases f3 <;> cases f4 <;> cases f5 <;>
-  cases g1 <;> cases g2 <;> cases g3 <;> cases g4 <;> cases g5 <;>
-  simp_all [classify, Flags.count, b2n, Health.rank]
+theorem classify_monotone (f g : Flags) (h : f.le g) : (classify f).ctorIdx ≤ (classify g).ctorIdx := by
+  have hc : f.count ≤ g.count := count_le f.bits g.bits rfl h
+  have hn : f.numeric → g.numeric := h (f.numeric, g.numeric) (by simp [Flags.bits])
+  unfold classify
+  repeat' split
+  all_goals first | decide | (simp_all <;> omega)
 
-/-- The mask encoding round-trips for every in-range mask. -/
-theorem mask_roundtrip : ∀ m : Fin 32, (ofMask m.val).mask = m.val := by decide
+theorem mask_roundtrip : ∀ m : Fin 32, (ofMask m).mask = m := by decide
 
 end Icarus

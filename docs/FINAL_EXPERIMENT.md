@@ -40,7 +40,7 @@ X -445221753 -299148819 -238628843 -213035707
 | Lean `lean/.lake/build/bin/icarus` | M H (recomputed from G) | byte-identical |
 
 The F\* and Lean executables take the reference's flag masks (`G`) as input and
-recompute health and mode with their verified `classify` and `decide`. They
+recompute health and mode with their verified `classify` and decision functions. They
 check the decision layer, not the arithmetic. The `X` agreement between ATS,
 Idris and the reference is exact here. The comparison tolerance (1e-6) did not
 have to absorb any difference on this fixture.
@@ -54,7 +54,7 @@ ctrl_sat 8, numeric 16. A decision taken in frame k appears in `M` at k+1.
 ### k = 0: Ready → Running
 
 - Every frame leaves Ready unconditionally.
-- Lean: `Decision.decide` (Ready branch), `Modes.ready_to_running`.
+- Lean: `Monitor.next` (Ready branch), `Modes.ready_to_running`.
 - F\*: `Icarus.Mode.ready_engages`.
 - Idris: `decideMode Ready` returns `(Running ** Engage)`.
 - ATS: `LEGAL_READY_RUNNING`.
@@ -69,7 +69,7 @@ ctrl_sat 8, numeric 16. A decision taken in frame k appears in `M` at k+1.
   proved.
 - One flag gives Suspect: Lean `Faults.classify`, F\* `Icarus.Health.classify`,
   and self-tests "health: one flag suspect" (ATS).
-- Suspect does not change the mode. This is a case of `decide` that no theorem
+- Suspect does not change the mode. This is a case of the decision function that no theorem
   isolates. The cross-check covers it.
 
 ### k = 8: biased channel, masked by the vote
@@ -153,7 +153,7 @@ ctrl_sat 8, numeric 16. A decision taken in frame k appears in `M` at k+1.
 
 | Invariant | Where it holds |
 |---|---|
-| Every transition is legal | Lean `Decision.decide_legal`; F\* return type of `Icarus.Mode.decide` (`legal s.mode s'.mode`); Idris `decideMode : … -> (m' ** Legal m m')`; ATS `decide_mode : … -> (LEGAL(m, m1) \| int(m1))` |
+| Every transition is legal | Lean `Decision.next_legal`; F\* return type of `Icarus.Mode.decide` (`legal s.mode s'.mode`); Idris `decideMode : … -> (m' ** Legal m m')`; ATS `decide_mode : … -> (LEGAL(m, m1) \| int(m1))` |
 | From Ready, the run never reaches Boot, SelfTest or Calibrating | Lean `Decision.never_boot`, `runFrames_operational`; F\* `run_operational` |
 | No allocation in the ATS frame loop | runtime check in `icarus_sim` (exit 4), benchmark rows at 0 allocator calls |
 | Frame buffers leased and returned exactly once | ATS linear `pool_vt` types; negative/ats/lease_leak.dats, lease_double_release.dats |

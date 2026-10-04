@@ -33,7 +33,7 @@ All Lean statements are over `Int` (A3).
 | Growing any stage by more than 100 makes the frame infeasible | `Numeric.budget_overflow` | proved | A11 | `negative/lean/budget_overflow.lean`; F\* budget mutation test |
 | Matrix–vector and matrix–matrix products only exist at matching dimensions | `Mat r c`, `Vec n` indices | type-enforced | — | `negative/lean/matvec_dim_mismatch.lean`, `mul_dim_mismatch.lean` |
 | Zero laws: `0·v = 0`, `M·0 = 0`, `0·B = 0`, `A·0 = 0` | `Linear.zero_mulVec`, `mulVec_zero`, `mul_zero_left`, `mul_zero_right` | proved | A3 | — |
-| Identity: `I·v = v` for every n, `I·A = A` | `Linear.id_mulVec`, `mul_id_left` (plus `id_mulVec_4`, `id_mulVec_2` by computation) | proved | A3 | ATS and Idris self-tests "matrix: right identity" |
+| Identity: `I·v = v` for every n, `I·A = A` | `Linear.id_mulVec`, `mul_id_left` | proved | A3 | ATS and Idris self-tests "matrix: right identity" |
 | Linearity of `M·v` in v, entrywise | `Linear.mulVec_add_apply`, `mulVec_sub_apply` | proved | A3 | — |
 | Matrix product is associative | `Linear.mul_assoc'` | proved | A3 | — |
 | Plant at the origin with zero input and disturbance stays at the origin | `Linear.plantStep_origin` | proved | A3, A12 | — |
@@ -41,14 +41,14 @@ All Lean statements are over `Int` (A3).
 | No flags classifies as Healthy | `Faults.no_flags_healthy` | proved | A8 | self-tests "health: none healthy" |
 | Classification is monotone in the flag set | `Faults.classify_monotone` | proved | A8 | — |
 | Flag mask encoding round-trips for all 32 masks | `Faults.mask_roundtrip` | proved | — | crosscheck (`G` lines decoded by F\* and Lean) |
-| Every decision is a legal transition | `Decision.decide_legal` | proved | A10 | crosscheck (all fixtures) |
+| Every decision is a legal transition | `Decision.next_legal` | proved | A10 | crosscheck (all fixtures) |
 | Safe and Fault absorb any frame, and any sequence of frames | `Decision.safe_absorbs`, `fault_absorbs`, `safe_forever` | proved | A9 | self-test "mode: Safe absorbs"; crosscheck `final_experiment` |
 | Unsafe in Running or Degraded forces Safe, permanently | `Decision.unsafe_forces_safe`, `unsafe_is_permanent` | proved | A9 | crosscheck `fault_numeric`, `final_experiment` |
 | A deadline miss in Running (not Unsafe) degrades | `Decision.overrun_degrades` | proved | A11 | crosscheck `fault_overrun`, `final_experiment` |
 | Three consecutive Healthy frames recover Degraded to Running | `Decision.recovers` | proved | — | self-test "mode: third healthy frame recovers" |
 | Three non-Healthy frames in one Degraded episode force Safe | `Decision.repeated_bad_to_safe` | proved | — | self-test "mode: repeated bad frames -> Safe"; crosscheck `fault_cascade` |
-| From an operational mode the loop never re-enters Boot, SelfTest or Calibrating | `Decision.decide_operational`, `runFrames_operational`, `never_boot` | proved | A10 | crosscheck `M` lines |
-| In operational modes, `decide` is the abstract machine `step` under a derived trigger | `Decision.decide_is_step` | proved (operational modes only) | A10 | — |
+| From an operational mode the loop never re-enters Boot, SelfTest or Calibrating | `Decision.next_operational`, `runFrames_operational`, `run_invariant`, `never_boot` | proved | A10 | crosscheck `M` lines |
+| In operational modes, `Monitor.next` is the abstract machine `step` under a derived trigger | `Decision.next_is_step` | proved (operational modes only) | A10 | — |
 | History buffer: length never exceeds capacity and saturates at it; a fresh buffer is empty | `Ring.len_le_cap`, `push_len`, `push_len_saturates`, `empty_len` | proved | — | ring self-tests (ATS, Idris) |
 | History reads need `age < len`; the newest read is the last push, and older entries shift by one per push | `Ring.get`, `get_newest`, `get_older` | proved | — | `negative/lean/ring_unwritten_read.lean`; ring self-tests |
 | After any pushes the buffer holds exactly the most recent `cap` values newest-first; every value read was written, in reverse write order | `Ring.pushAll_slots`, `read_was_written`, `read_order` | proved | — | ring self-tests "ring: oldest retained …" |

@@ -1,5 +1,3 @@
--- EXPECT: Mismatch between
--- Multiplying a 4x3 matrix by a 2x4 matrix: the inner dimensions (3 and 2) differ.
 module Neg.MatMulDims
 import Icarus.Linear
 import Data.Vect

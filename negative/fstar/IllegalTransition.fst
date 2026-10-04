@@ -1,5 +1,3 @@
-(* EXPECT: Subtyping check failed|Assertion failed|could not prove *)
-(* A transition out of Safe into Running is not in the legal table. *)
 module IllegalTransition
 open Icarus.Mode
 

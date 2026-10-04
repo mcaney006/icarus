@@ -1,5 +1,3 @@
-(* EXPECT: linear|abandoned|not consumed *)
-(* A lease that is never handed back is a leaked resource. *)
 #include "share/atspre_staload.hats"
 staload "./pool.sats"
 

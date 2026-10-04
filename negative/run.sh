@@ -1,106 +1,100 @@
 #!/usr/bin/env bash
-# Runs every negative/ program through its language's checker and requires it to
-# FAIL with the documented message. Each program has a well-typed twin under
-# ok/ that must succeed, so a failure cannot be an unrelated harness problem.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DETECT="bash $ROOT/tools/detect-toolchains.sh"
-fail=0; total=0
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+SCRATCH="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH"' EXIT
+total=0
+failures=0
 
-expect_of() { grep -m1 '^-- EXPECT:\|^(\* EXPECT:\|^// EXPECT:' "$1" | sed 's/^[^:]*EXPECT: *//; s/ *\*)$//'; }
+expected() { awk -F'\t' -v key="$1" '$1 == key { print $2; exit }' "$ROOT/negative/expected"; }
 
-report() { # name status detail
-  total=$((total+1))
-  if [ "$2" = ok ]; then printf '  %-34s rejected as expected\n' "$1"
-  else printf '  %-34s FAIL %s\n' "$1" "$3"; fail=$((fail+1)); fi
+report() {
+  total=$((total + 1))
+  if [ -z "$2" ]; then printf '  %-34s rejected as expected\n' "$1"
+  else printf '  %-34s FAIL %s\n' "$1" "$2"; failures=$((failures + 1)); fi
 }
 
-idris_check() { # stage the program as <module path>.idr beside the library modules
-  local mod rel root; mod="$(grep -m1 '^module ' "$1" | awk '{print $2}')"
-  rel="$(echo "$mod" | tr . /).idr"; root="$TMP/idris-src-$RANDOM"
-  mkdir -p "$root/$(dirname "$rel")"; cp -R "$ROOT/idris/src/Icarus" "$root/Icarus"
-  cp "$1" "$root/$rel"
-  ( cd "$root" && "$IDRIS" --check --source-dir "$root" --build-dir "$TMP/idris-build" "$root/$rel" 2>&1 )
+first_lines() { head -2 | tr '\n' ' '; }
+
+verdict() {
+  local key="$1" rejected_rc="$2" output="$3" twin_rc="$4" twin_output="$5" pattern
+  pattern="$(expected "$key")"
+  if [ -z "$pattern" ]; then report "$key" "no expected message in negative/expected"
+  elif [ "$rejected_rc" -eq 0 ]; then report "$key" "accepted but must be rejected"
+  elif [ "$twin_rc" -ne 0 ]; then report "$key" "well-typed twin failed: $(first_lines <<<"$twin_output")"
+  elif ! grep -Eq "$pattern" <<<"$output"; then report "$key" "rejected, but message did not match /$pattern/: $(first_lines <<<"$output")"
+  else report "$key" ""; fi
 }
 
-if IDRIS="$($DETECT --path idris2)" && [ -n "$IDRIS" ] && [ -d "$ROOT/negative/idris" ]; then
-  echo "[idris] negative programs"
-  ( cd "$ROOT/idris" && "$IDRIS" --build icarus.ipkg >/dev/null 2>&1 )
-  for f in "$ROOT"/negative/idris/*.idr; do
-    n="$(basename "$f" .idr)"; pat="$(expect_of "$f")"
-    out="$(idris_check "$f")"; rc=$?
-    twin="$(idris_check "$ROOT/negative/idris/ok/$n.idr")"; trc=$?
-    if [ $rc -eq 0 ]; then report "idris/$n" bad "compiled but must be rejected"
-    elif [ $trc -ne 0 ]; then report "idris/$n" bad "well-typed twin failed: $(echo "$twin" | head -2 | tr '\n' ' ')"
-    elif ! echo "$out" | grep -Eq "$pat"; then report "idris/$n" bad "rejected, but message did not match /$pat/"
-    else report "idris/$n" ok; fi
+suite() {
+  local lang="$1" extension="$2" checker="$3" program name output rc twin trc
+  echo "[$lang] negative programs"
+  for program in "$ROOT/negative/$lang"/*."$extension"; do
+    name="$(basename "$program" ".$extension")"
+    output="$("$checker" "$program")"; rc=$?
+    twin="$("$checker" "$ROOT/negative/$lang/ok/$name.$extension")"; trc=$?
+    verdict "$lang/$name" "$rc" "$output" "$trc" "$twin"
   done
+}
+
+idris_check() {
+  local module relative root
+  module="$(awk '/^module / { print $2; exit }' "$1")"
+  relative="${module//.//}.idr"
+  root="$SCRATCH/idris-$RANDOM"
+  mkdir -p "$root/$(dirname "$relative")"
+  cp -R "$ROOT/idris/src/Icarus" "$root/Icarus"
+  cp "$1" "$root/$relative"
+  (cd "$root" && "$IDRIS" --check --source-dir "$root" --build-dir "$SCRATCH/idris-build" "$root/$relative" 2>&1)
+}
+
+fstar_check() {
+  local work="$SCRATCH/fstar-$RANDOM"
+  mkdir -p "$work/cache" "$work/src"
+  cp "$ROOT"/fstar/out/cache/*.checked "$work/cache/"
+  cp "$1" "$work/src/"
+  (cd "$work" && "$FSTAR" --include "$ROOT/fstar/src" --include "$work/src" --cache_checked_modules \
+    --cache_dir "$work/cache" "$work/src/$(basename "$1")" 2>&1)
+}
+
+fstar_budget_mutation() {
+  local work="$SCRATCH/mutation" output rc
+  mkdir -p "$work/cache"
+  sed 's/| Estimate -> 220/| Estimate -> 400/' "$ROOT/fstar/src/Icarus.Timing.fst" >"$work/Icarus.Timing.fst"
+  cmp -s "$work/Icarus.Timing.fst" "$ROOT/fstar/src/Icarus.Timing.fst" && { report fstar/budget_overflow "mutation did not apply"; return; }
+  output="$(cd "$work" && "$FSTAR" --cache_dir "$work/cache" "$work/Icarus.Timing.fst" 2>&1)"; rc=$?
+  verdict fstar/budget_overflow "$rc" "$output" 0 ""
+}
+
+ats_check() {
+  local work="$SCRATCH/ats-$RANDOM"
+  mkdir -p "$work"
+  cp "$ROOT"/ats/src/*.sats "$work/"
+  cp "$1" "$work/"
+  (cd "$work" && "$PATSCC" -tcats "$(basename "$1")" 2>&1)
+}
+
+lean_check() { (cd "$ROOT/lean" && "$LAKE" env lean "$1" 2>&1); }
+
+if IDRIS="$($DETECT --path idris2)" && [ -n "$IDRIS" ]; then
+  (cd "$ROOT/idris" && "$IDRIS" --build icarus.ipkg >/dev/null 2>&1)
+  suite idris idr idris_check
 else echo "[idris] SKIP"; fi
 
-fstar_check() { # verify a program against the already-checked Icarus modules
-  local f="$1" d; d="$TMP/fstar-$RANDOM"; mkdir -p "$d/cache" "$d/src"
-  cp "$ROOT"/fstar/out/cache/*.checked "$d/cache/" 2>/dev/null
-  cp "$f" "$d/src/$(basename "$f")"
-  ( cd "$d" && "$FSTAR" --include "$ROOT/fstar/src" --include "$d/src" --cache_checked_modules \
-      --cache_dir "$d/cache" "$d/src/$(basename "$f")" 2>&1 )
-}
-
 if FSTAR="$($DETECT --path fstar)" && [ -n "$FSTAR" ] && [ -d "$ROOT/fstar/out/cache" ]; then
-  echo "[fstar] negative programs"
-  for f in "$ROOT"/negative/fstar/*.fst; do
-    n="$(basename "$f" .fst)"; pat="$(expect_of "$f")"
-    out="$(fstar_check "$f")"; rc=$?
-    twin="$(fstar_check "$ROOT/negative/fstar/ok/$n.fst")"; trc=$?
-    if [ $rc -eq 0 ]; then report "fstar/$n" bad "verified but must be rejected"
-    elif [ $trc -ne 0 ]; then report "fstar/$n" bad "twin failed: $(echo "$twin" | grep -m1 -A2 Error | tr '\n' ' ')"
-    elif ! echo "$out" | grep -Eq "$pat"; then report "fstar/$n" bad "rejected, but message did not match /$pat/"
-    else report "fstar/$n" ok; fi
-  done
-  # Mutation test: enlarge the Estimate stage until the frame cannot fit and
-  # require the real timing module to stop verifying.
-  mut="$TMP/mut"; mkdir -p "$mut/cache"
-  sed 's/| Estimate -> 220/| Estimate -> 400/' "$ROOT/fstar/src/Icarus.Timing.fst" > "$mut/Icarus.Timing.fst"
-  out="$( cd "$mut" && "$FSTAR" --cache_dir "$mut/cache" "$mut/Icarus.Timing.fst" 2>&1 )"; rc=$?
-  if [ $rc -eq 0 ]; then report "fstar/budget_overflow(mutation)" bad "oversized schedule verified"
-  elif ! echo "$out" | grep -Eq "Assertion failed|could not prove|normalization"; then report "fstar/budget_overflow(mutation)" bad "unexpected message: $(echo "$out" | head -3 | tr '\n' ' ')"
-  else report "fstar/budget_overflow(mutation)" ok; fi
-else echo "[fstar] SKIP (toolchain or out/cache missing; run make -C fstar)"; fi
+  suite fstar fst fstar_check
+  fstar_budget_mutation
+else echo "[fstar] SKIP (toolchain or fstar/out/cache missing; run make -C fstar)"; fi
 
-ats_check() { # type-check one program beside the ATS interface files
-  local d; d="$TMP/ats-$RANDOM"; mkdir -p "$d"
-  cp "$ROOT"/ats/src/*.sats "$d/"; cp "$1" "$d/$(basename "$1")"
-  ( cd "$d" && "$PATSCC" -tcats "$(basename "$1")" 2>&1 )
-}
-
-if PATSCC="$($DETECT --path patscc)" && [ -n "$PATSCC" ] && [ -d "$ROOT/negative/ats" ]; then
-  echo "[ats] negative programs"
-  for f in "$ROOT"/negative/ats/*.dats; do
-    n="$(basename "$f" .dats)"; pat="$(expect_of "$f")"
-    out="$(ats_check "$f")"; rc=$?
-    twin="$(ats_check "$ROOT/negative/ats/ok/$n.dats")"; trc=$?
-    if [ $rc -eq 0 ]; then report "ats/$n" bad "type-checked but must be rejected"
-    elif [ $trc -ne 0 ]; then report "ats/$n" bad "twin failed: $(echo "$twin" | head -2 | tr '\n' ' ')"
-    elif ! echo "$out" | grep -Eq "$pat"; then report "ats/$n" bad "rejected, but message did not match /$pat/: $(echo "$out" | head -2 | tr '\n' ' ')"
-    else report "ats/$n" ok; fi
-  done
+if PATSCC="$($DETECT --path patscc)" && [ -n "$PATSCC" ]; then
+  suite ats dats ats_check
 else echo "[ats] SKIP"; fi
 
-lean_check() { ( cd "$ROOT/lean" && "$LAKE" env lean "$1" 2>&1 ); }
-
-if LAKE="$($DETECT --path lake)" && [ -n "$LAKE" ] && [ -d "$ROOT/negative/lean" ]; then
-  echo "[lean] negative programs"
-  ( cd "$ROOT/lean" && "$LAKE" build >/dev/null 2>&1 )
-  for f in "$ROOT"/negative/lean/*.lean; do
-    n="$(basename "$f" .lean)"; pat="$(expect_of "$f")"
-    out="$(lean_check "$f")"; rc=$?
-    twin="$(lean_check "$ROOT/negative/lean/ok/$n.lean")"; trc=$?
-    if [ $rc -eq 0 ]; then report "lean/$n" bad "checked but must be rejected"
-    elif [ $trc -ne 0 ]; then report "lean/$n" bad "twin failed: $(echo "$twin" | head -2 | tr '\n' ' ')"
-    elif ! echo "$out" | grep -Eq "$pat"; then report "lean/$n" bad "rejected, but message did not match /$pat/: $(echo "$out" | head -2 | tr '\n' ' ')"
-    else report "lean/$n" ok; fi
-  done
+if LAKE="$($DETECT --path lake)" && [ -n "$LAKE" ]; then
+  (cd "$ROOT/lean" && "$LAKE" build >/dev/null 2>&1)
+  suite lean lean lean_check
 else echo "[lean] SKIP"; fi
 
-echo "negative: $total programs, $fail failures"
-[ $fail -eq 0 ]
+echo "negative: $total programs, $failures failures"
+[ "$failures" -eq 0 ]

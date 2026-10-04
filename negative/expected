@@ -1,0 +1,24 @@
+ats/empty_pool_take	unsolved constraint|mismatch|cannot be assigned
+ats/illegal_transition	unsolved constraint|mismatch|cannot be assigned
+ats/index_out_of_bounds	unsolved constraint
+ats/lease_double_release	no longer available|linear|cannot be assigned
+ats/lease_leak	linear|abandoned|not consumed
+ats/matmul_dim_mismatch	unsolved constraint|mismatch|cannot be resolved
+fstar/CounterWraps	Subtyping check failed|Assertion failed|could not prove
+fstar/IllegalTransition	Subtyping check failed|Assertion failed|could not prove
+fstar/RingReadUnwritten	Subtyping check failed|Assertion failed|could not prove
+fstar/SaturationUnreported	Subtyping check failed|Assertion failed|could not prove
+idris/illegal_transition	Mismatch between
+idris/index_out_of_bounds	Can't find an implementation|Mismatch|Can't solve
+idris/matmul_dim_mismatch	Mismatch between
+idris/ring_unproven_read	Can't find an implementation for
+idris/safe_to_running	Mismatch between
+idris/unit_mismatch	Mismatch between
+lean/budget_overflow	decide|evaluates to false|failed
+lean/illegal_transition	decide|evaluates to false|failed
+lean/matvec_dim_mismatch	[Tt]ype mismatch|application type mismatch
+lean/mul_dim_mismatch	[Tt]ype mismatch|application type mismatch
+lean/ring_unwritten_read	decide|evaluates to false|failed
+lean/safe_escape	decide|evaluates to false|failed|rfl
+lean/strict_control_bound	[Tt]ype mismatch|application type mismatch
+fstar/budget_overflow	Assertion failed|could not prove|normalization
