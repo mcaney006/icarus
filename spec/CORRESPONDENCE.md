@@ -75,7 +75,7 @@ cross-check fails if a copy drifts in a way the fixtures exercise.
 | All parsers reject corrupt input | 4 corruption variants of the first fixture (payload flip, missing checksum, truncation; wrong dimensions with a valid checksum for ATS and Idris) | tested |
 | Lean `Monitor.next` ↔ F\* `decide` ↔ Idris `next` ↔ ATS `decide_mode` | Same case structure, same constants; the cross-check exercises every branch on some fixture | by inspection + tested |
 | Lean integer model ↔ float executables | none | **not checked**. The Lean theorems are about ℤ. |
-| Stage budgets ↔ actual stage work | `Icarus.Cost` (abstract operation counts, transcribed by hand) | by inspection; see docs/results/cost_model.md |
+| Stage budgets ↔ actual stage work | `Icarus.AbstractCost` (abstract operation counts, transcribed by hand) | by inspection; see docs/results/cost_model.md |
 
 ## Deliberate differences
 

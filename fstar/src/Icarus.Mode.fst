@@ -1,6 +1,3 @@
-(* Mode manager. `decide` returns a state whose mode is *refined* to be a legal
-   successor of the current one, so every branch must justify its transition to
-   the verifier. Mirrors reference/icarus_ref.py and lean/Icarus/Modes.lean. *)
 module Icarus.Mode
 open Icarus.Health
 
@@ -31,7 +28,6 @@ type st = { mode: mode; healthy: nat; bad: nat }
 
 let initial : st = { mode = Ready; healthy = 0; bad = 0 }
 
-(* The next monitor state; its mode is a legal successor by construction. *)
 let decide (s:st) (h:health) (miss:bool)
   : Tot (s':st{legal s.mode s'.mode})
   = let healthy' = if h = Healthy then s.healthy + 1 else 0 in
@@ -52,8 +48,6 @@ let decide (s:st) (h:health) (miss:bool)
          then { mode = Safe; healthy = healthy'; bad = s.bad + 1 }
          else { mode = Degraded; healthy = healthy'; bad = s.bad + 1 })
     | m -> { mode = m; healthy = healthy'; bad = s.bad }
-
-(* ---- properties ---------------------------------------------------------- *)
 
 let safe_absorbs (s:st) (h:health) (miss:bool)
   : Lemma (requires s.mode = Safe) (ensures (decide s h miss).mode = Safe) = ()
@@ -76,12 +70,10 @@ let recovers (s:st)
 let ready_engages (s:st) (h:health) (miss:bool)
   : Lemma (requires s.mode = Ready) (ensures (decide s h miss).mode = Running) = ()
 
-(* The spec's illegal transitions are rejected by the table itself. *)
 let illegal_examples ()
   : Lemma (legal Boot Running = false /\ legal Safe Running = false
            /\ legal Fault Ready = false /\ legal Safe Degraded = false) = ()
 
-(* Once Safe, no sequence of frames can leave it. *)
 let rec run (s:st) (frames:list (health & bool)) : Tot st (decreases frames) =
   match frames with
   | [] -> s
@@ -94,17 +86,13 @@ let rec safe_stays_safe (s:st) (frames:list (health & bool))
     | [] -> ()
     | (h, miss) :: rest -> safe_stays_safe (decide s h miss) rest
 
-(* An Unsafe frame while Running forces Safe permanently, whatever follows. *)
 let unsafe_is_permanent (s:st) (rest:list (health & bool)) (miss:bool)
   : Lemma (requires s.mode = Running \/ s.mode = Degraded)
           (ensures (run s ((Unsafe, miss) :: rest)).mode = Safe)
   = unsafe_forces_safe s miss;
     safe_stays_safe (decide s Unsafe miss) rest
 
-(* From Ready only operational modes are reachable: Boot, SelfTest, Calibrating
-   and Fault can never reappear once the controller is running. *)
-let operational (m:mode) : bool =
-  m = Ready || m = Running || m = Degraded || m = Safe
+let operational (m:mode) : bool = m = Ready || m = Running || m = Degraded || m = Safe
 
 let decide_operational (s:st) (h:health) (miss:bool)
   : Lemma (requires operational s.mode) (ensures operational (decide s h miss).mode) = ()
@@ -115,6 +103,3 @@ let rec run_operational (s:st) (frames:list (health & bool))
   = match frames with
     | [] -> ()
     | (h, miss) :: rest -> decide_operational s h miss; run_operational (decide s h miss) rest
-
-let initial_operational ()
-  : Lemma (operational initial.mode) = ()

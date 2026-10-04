@@ -101,7 +101,7 @@ No fixture exercises them.
 - An overrun is a number injected by a fixture. Nothing measures it.
 - The cyclic executive is a sequential loop: no interrupts, no concurrency,
   no clock.
-- The cost model (`Icarus.Cost`) is an abstract operation count. It is not a
+- The cost model (`Icarus.AbstractCost`) is an abstract operation count. It is not a
   WCET analysis and predicts no duration.
 
 ## Plant and data

@@ -68,7 +68,7 @@ All Lean statements are over `Int` (A3).
 | `advance s n` is `s + n` or exhaustion | `Icarus.Counter.advance_monotone` | proved | — | — |
 | Stage budgets fit the frame with margin 100 | `Icarus.Timing.schedule_fits`, `margin_is_100` | proved | A11 | budget mutation test in `negative/run.sh` |
 | A ledger never records more than the frame; `charge` returns exact use or exact excess | `Icarus.Timing.ledger`, `charge` | refinement | A11 | — |
-| The nominal schedule completes using 900 ticks | `Icarus.Timing.nominal_completes`, `nominal_uses_900` | proved | A11 | — |
+| The nominal schedule runs in a tick-graded state monad at type `frame 0 (sum_budgets stages)`: each stage must fit in the ticks that remain, so a schedule that overflows the frame does not typecheck; it ends at 900 ticks | `Icarus.Timing.frame`, `run_stage`, `run_stages`, `nominal`, `nominal_uses_900` | refinement | A11 | budget mutation test in `negative/run.sh` |
 | An overrun misses the deadline exactly when it exceeds the 100-tick margin | `Icarus.Timing.miss_iff_beyond_margin`, `overrun_larger_than_margin_detected`, `overrun_within_margin_absorbed` | proved | A11 | crosscheck `fault_overrun` |
 | Ring length never exceeds capacity, and the write index stays in range | `Icarus.Ring.push_len`, `len_never_exceeds_capacity` | proved | — | self-tests "ring: length saturates at capacity" |
 | Reads need `age < len`; the newest read returns the last push, and older entries shift by one | `Icarus.Ring.get` (refinement), `get_newest`, `slot_shift`, `get_older` | proved | — | `negative/fstar/RingReadUnwritten.fst`; ring self-tests |
@@ -78,7 +78,7 @@ All Lean statements are over `Int` (A3).
 | Boot→Running and Safe→Running are illegal | `Icarus.Mode.illegal_examples` | proved | A10 | — |
 | Operational modes are closed under `decide` and `run` | `Icarus.Mode.decide_operational`, `run_operational` | proved | A10 | — |
 | Decimal encoding of naturals and integers round-trips | `Icarus.Wire.roundtrip`, `roundtrip_int` | proved | — | crosscheck (extracted parser reads every fixture) |
-| Abstract cost model: Acquire and Estimate exceed their budgets, the frame fits, the merged-observer saving equals the innovation monitor | `Icarus.Cost` (seven `assert_norm` facts, `matvec_monotone`) | proved | A11 | `fstar/out/icarus_cost` table (docs/results/cost_model.md) |
+| Abstract cost model: Acquire and Estimate exceed their budgets, the frame fits, the merged-observer saving equals the innovation monitor | `Icarus.AbstractCost` (seven `assert_norm` facts, `matvec_monotone`) | proved | A11 | `fstar/out/icarus_cost` table (docs/results/cost_model.md) |
 
 ## Idris 2: dependently typed domain model (`idris/src/`)
 

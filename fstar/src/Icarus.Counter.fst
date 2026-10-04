@@ -1,5 +1,3 @@
-(* Bounded monotonic sequence numbers. `bump` never wraps: at the limit it
-   reports exhaustion instead of returning a smaller value. *)
 module Icarus.Counter
 
 let max_seq : nat = 4294967295

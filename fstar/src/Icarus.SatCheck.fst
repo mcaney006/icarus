@@ -1,7 +1,3 @@
-(* Executable wrapper over the verified saturating arithmetic: one operation per
-   input line ("a|s|m  x  y"), one result per output line ("value saturated").
-   tools/satcheck.py feeds it vectors and compares against the Python fixed-point
-   backend used in the experiments. *)
 module Icarus.SatCheck
 
 open FStar.All

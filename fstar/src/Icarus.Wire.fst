@@ -1,6 +1,3 @@
-(* Telemetry wire layer: decimal encode/decode with a proved round trip, plus
-   the FNV-1a checksum used by the ICF format (spec/ICF.md). Digits are a
-   refined type, so an encoder can never emit a value outside 0..9. *)
 module Icarus.Wire
 
 module L = FStar.List.Tot
@@ -53,7 +50,6 @@ let rec dec_acc_of_digits (acc:nat) (ds:list digit)
     | [] -> ()
     | d :: rest -> char_digit_inverts d; dec_acc_of_digits (acc * 10 + d) rest
 
-(* Decoding what was encoded returns the original number. *)
 let roundtrip (n:nat) : Lemma (dec_acc 0 (enc_chars n) = Some n)
   = dec_acc_of_digits 0 (enc_nat n); enc_dec_digits n
 
@@ -80,7 +76,6 @@ let roundtrip_int (i:int) : Lemma (dec_int (enc_int i) = Some i)
       | d :: _ -> digit_char_is_not_minus d
     end
 
-(* ---- FNV-1a over characters ------------------------------------------- *)
 let fnv_offset : U32.t = 0x811C9DC5ul
 let fnv_prime  : U32.t = 0x01000193ul
 

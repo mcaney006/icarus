@@ -182,14 +182,19 @@ Where the types were weaker than intended:
 - **Checked twice.** Lean (`budget_fits`, `budget_margin`, `budget_overflow`)
   and F\* (`schedule_fits`, `margin_is_100`) both prove the sum fits. A mutation
   test raises Estimate to 400 and requires F\* to reject the module.
-- **Ledger.** The F\* ledger charges stages one at a time. Its type cannot
-  hold more than the frame, and `charge` returns either the exact use or the
-  exact excess.
+- **Ledger.** F\* runs the schedule in a state monad graded by ticks:
+  `frame before after a`. Each stage requires `before + budget ≤ 1000`, and
+  the nominal schedule must have type `frame 0 (sum_budgets stages)`. A stage
+  that overflows the frame is a type error, not a test failure. This F\*
+  release has removed indexed effects, so the monad is an ordinary dependent
+  type with a custom `let!` binder rather than a declared effect. A
+  dynamically injected overrun goes through `charge`, which returns either the
+  exact use or the exact excess.
 - **Deadline misses.** An overrun is injected per frame. A miss happens exactly
   when the overrun exceeds the margin (`miss_iff_beyond_margin`), and a miss in
   Running degrades.
 - **What the abstract cost model found.** The cost model
-  (`Icarus.Cost`, docs/results/cost_model.md) counts operations in each stage as
+  (`Icarus.AbstractCost`, docs/results/cost_model.md) counts operations in each stage as
   implemented. Under unit weights:
   - Acquire costs 188 against its 120 budget and Estimate 272 against 220.
   - The frame total, 721, still fits.

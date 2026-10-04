@@ -1,8 +1,7 @@
-(* Prints the cost model as CSV: model, scan slots, stage, modelled cost, budget. *)
 module Icarus.CostReport
 
 open FStar.All
-open Icarus.Cost
+open Icarus.AbstractCost
 open Icarus.Timing
 open Icarus.Wire
 
