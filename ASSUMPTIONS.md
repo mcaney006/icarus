@@ -21,7 +21,7 @@ below. Other documents cite them by ID.
   behind the linear signatures in `pool.sats`.
 - `ats/src/io_shim.c` (file read, monotonic clock) and `ats/src/alloc_user.c`
   (counting allocator). These are plain C.
-- `idris/src/Main.idr` `main` is `partial` because the library `readFile` is
+- `idris/src/Main.idr` `main` and `withFixture` are `partial` because the library `readFile` is
   not total.
 - The F\* drivers in `fstar/driver/*.ml` and the F\* ML runtime (`FStar.IO`,
   string primitives) that extracted code links against.

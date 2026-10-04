@@ -85,12 +85,13 @@ All Lean statements are over `Int` (A3).
 | Property | Source | Status | Assumptions | Executable test counterpart |
 |---|---|---|---|---|
 | Only the 12 legal moves (plus `Stay`) are constructible; Safe has no exit | `Icarus.Mode.Legal`, `transition` | type-enforced | A9, A10 | `negative/idris/illegal_transition.idr`, `safe_to_running.idr` |
-| Every decision carries its legality proof | `Icarus.Plant.decideMode : … -> (m' ** Legal m m')` | type-enforced | A10 | crosscheck (all fixtures) |
+| Every decision carries its legality proof | `Icarus.Plant.next : (s : Monitor) -> … -> (s' : Monitor ** Legal s.mode s'.mode)` | type-enforced | A10 | crosscheck (all fixtures) |
+| Mode, health and fault codes equal constructor order, so they cannot drift from the ICF numbering | `Icarus.Codes.enumeration` (elaborator reflection generates `modeCode`, `healthCode`, `faultOfCode`, …) | derived at compile time | A13 | crosscheck (codes in every `M`/`H`/`F` line) |
 | Matrix products need matching inner dimensions | `Icarus.Linear.matMul`, `matVec` | type-enforced | — | `negative/idris/matmul_dim_mismatch.idr`; self-test "matrix: 2x3 * 3x2 product" |
 | Vector indices are bounded | `Vect n`, `Fin n` | type-enforced | — | `negative/idris/index_out_of_bounds.idr` |
 | A history read needs an erased proof that the age is below the occupied length | `Icarus.Ring.peek` | type-enforced | — | `negative/idris/ring_unproven_read.idr`; ring self-tests |
 | Quantities of different dimension cannot be added | `Icarus.Dim.Quantity`, `qadd` | type-enforced | — | `negative/idris/unit_mismatch.idr`; self-tests "units: …" |
-| Every function in `Icarus.*` is total | `%default total` | type-enforced | A2 (`Main.main` is partial) | `tools/audit-holes.sh` |
+| Every function in `Icarus.*` is total | `%default total` | type-enforced | A2 (`Main.main` and `Main.withFixture` are partial) | `tools/audit-holes.sh` |
 | A fixture whose vector or matrix lengths disagree with its declared dimensions is rejected | `Icarus.Fixture.exactVect`, `exactMatrix` | runtime-checked (a successful parse yields a `Vect` of the declared length) | A13 | crosscheck corruption `wrong-dimensions` |
 
 ## ATS2: linear deterministic runtime (`ats/src/`)

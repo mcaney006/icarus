@@ -3,13 +3,16 @@ version = 0.1.0
 authors = "icarus"
 sourcedir = "src"
 depends = base
-modules = Icarus.Dim
+modules = Icarus.Types
+        , Icarus.Codes
+        , Icarus.Dim
         , Icarus.Linear
         , Icarus.Mode
         , Icarus.Ring
         , Icarus.Plant
         , Icarus.Fixture
         , Icarus.SelfTest
+        , Icarus.Bench
 main = Main
 executable = icarus
 builddir = "build"

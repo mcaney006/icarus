@@ -27,21 +27,21 @@ The only data that crosses a language boundary is the ICF 2 file format
 | Scalar | `Int` (exact) | `Double` | `int` (unbounded); `fx` (bounded raw word) | `double` | `float`; `FixedArith` raw int |
 | Vector of n | `Vec n` = `Fin n → Int` | `Vect n Double` | — | `arrayptr(double, n)` | `list` |
 | r×c matrix | `Mat r c` | `Matrix r c Double` | — | `matrixptr(double, r, c)` | `list` of rows |
-| Plant x⁺ = Ax + Bu + w | `Linear.plantStep` | `Plant.advancePlant` | — | end of `do_frame` | end of `run` loop |
+| Plant x⁺ = Ax + Bu + w | `Linear.plantStep` | `Plant.advance` | — | end of `do_frame` | end of `run` loop |
 | Measurement y = Cx + v | `Linear.measure` | `vadd (matVec cMat x) v` in `frame` | — | Acquire block of `do_frame` | `vadd(matvec(C, x), v)` |
 | Observer update | `Controller.observe` | `Plant.observe` | — | Estimate block of `do_frame` | Estimate block |
 | Control u = sat(−K x̂) | `Controller.control` | `clampAll` in `frame` | `Sat.clamp` (fixed-point word) | `clamp_all` | `A.clamp` |
-| Mode | `Modes.Mode` | `Mode.Mode` | `Icarus.Mode.mode` | static int 0–7 | `Mode` enum |
+| Mode | `Modes.Mode` | `Types.Mode` | `Icarus.Mode.mode` | static int 0–7 | `Mode` enum |
 | Legal transition | `Modes.legal` (Bool) | `Legal m m'` (type family) | `legal` (bool, in `decide`'s return type) | `dataprop LEGAL(m, m1)` | `LEGAL` table |
-| Fault kind | `Faults.FaultKind` | `Plant.FaultKind` | — (sees flags only) | int code from the fixture | `Fault` enum |
-| Health | `Faults.Health` | `Plant.Health` | `Icarus.Health.health` | int 0–3 | `Health` enum |
+| Fault kind | `Faults.FaultKind` | `Types.FaultKind` (codes derived by `Codes.enumeration`) | — (sees flags only) | int code from the fixture | `Fault` enum |
+| Health | `Faults.Health` | `Types.Health` | `Icarus.Health.health` | int 0–3 | `Health` enum |
 | Fault flags | `Faults.Flags` | `Plant.Flags` | `Icarus.Health.flags` | bit mask int | `set` of names |
 | Classification | `Faults.classify` | `Plant.classify` | `Icarus.Health.classify` | `classify` (mode.dats) | Health block |
-| Decision state | `Decision.Monitor` | `Sim` (mode, healthy, bad) | `Icarus.Mode.st` | `ctl` array in `st_vt` | locals `mode`, `healthy_streak`, `degraded_bad` |
-| Decision function | `Monitor.next` | `Plant.decideMode` | `Icarus.Mode.decide` | `decide_mode` | Decide block |
+| Decision state | `Decision.Monitor` | `Plant.Monitor` | `Icarus.Mode.st` | `ctl` array in `st_vt` | locals `mode`, `healthy_streak`, `degraded_bad` |
+| Decision function | `Monitor.next` | `Plant.next` (via `decideMode`) | `Icarus.Mode.decide` | `decide_mode` | Decide block |
 | Three-channel vote | — | `Plant.median3` | `Icarus.Vote.med` (over `int`) | `median3` | `median3` |
 | History buffer | `Ring α cap` (newest-first list model) | `Ring (S c) a` | `ring a cap` | `ring_vt(cap)` | — |
-| Frame timing | `Numeric.stageBudgets` | `stageSum`, `frameBudget` | `Icarus.Timing` | `900 + over > 1000` | `STAGE_BUDGET`, `FRAME_BUDGET` |
+| Frame timing | `Numeric.stageBudgets` | `nominalFrameCost`, `frameBudget` | `Icarus.Timing` | `900 + over > 1000` | `STAGE_BUDGET`, `FRAME_BUDGET` |
 | Units | — | `Dim.Quantity` (dimension-indexed) | — | — | — |
 | Buffer ownership | — | — | — | `pool_vt(n, avail)` linear leases | — |
 
@@ -73,7 +73,7 @@ cross-check fails if a copy drifts in a way the fixtures exercise.
 | Reference `FixedArith` ↔ F\* `Sat` | `tools/satcheck.py`, 6972 vectors, exact | tested |
 | Reference float ↔ fixed-point | `tools/fixed_point_experiment.py`, measured deviation | measured; not claimed equal |
 | All parsers reject corrupt input | 4 corruption variants of the first fixture (payload flip, missing checksum, truncation; wrong dimensions with a valid checksum for ATS and Idris) | tested |
-| Lean `Monitor.next` ↔ F\* `decide` ↔ Idris `decideMode` ↔ ATS `decide_mode` | Same case structure, same constants; the cross-check exercises every branch on some fixture | by inspection + tested |
+| Lean `Monitor.next` ↔ F\* `decide` ↔ Idris `next` ↔ ATS `decide_mode` | Same case structure, same constants; the cross-check exercises every branch on some fixture | by inspection + tested |
 | Lean integer model ↔ float executables | none | **not checked**. The Lean theorems are about ℤ. |
 | Stage budgets ↔ actual stage work | `Icarus.Cost` (abstract operation counts, transcribed by hand) | by inspection; see docs/results/cost_model.md |
 
